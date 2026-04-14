@@ -26,6 +26,7 @@ export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth
     if (!newCenter.name.trim()) { setError('El nombre es obligatorio'); return }
     if (!newCenter.monthly_amount || isNaN(parseInt(newCenter.monthly_amount))) { setError('El monto debe ser un número'); return }
     setSaving(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
     const { data, error: err } = await supabase.from('cost_centers').insert({
       name: newCenter.name.trim(),
       icon: newCenter.icon,
@@ -33,6 +34,7 @@ export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth
       monthly_amount: parseInt(newCenter.monthly_amount),
       description: newCenter.description || null,
       color: newCenter.color,
+      user_id: u?.id,
       sort_order: centers.length,
       is_active: true,
     }).select().single()

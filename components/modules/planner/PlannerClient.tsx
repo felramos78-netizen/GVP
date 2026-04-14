@@ -52,7 +52,9 @@ export function PlannerClient({
   const handleAddMeal = async () => {
     if (!addingMeal || !mealForm.free_text.trim()) return
     setSaving(true)
+    const { data: { user: up } } = await supabase.auth.getUser()
     const { error } = await supabase.from('meal_plan').upsert({
+      user_id: up?.id,
       plan_date: addingMeal.date,
       meal_type: addingMeal.type,
       free_text: mealForm.free_text.trim(),

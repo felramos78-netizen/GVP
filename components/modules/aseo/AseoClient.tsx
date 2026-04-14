@@ -34,8 +34,10 @@ export function AseoClient({ tasks: initialTasks, recentLogs, aseoStock }: any) 
 
   const handleComplete = async (taskId: string) => {
     setCompleting(taskId)
+    const { data: { user: ul } } = await supabase.auth.getUser()
     await supabase.from('task_log').insert({
       task_id: taskId,
+      user_id: ul?.id,
       done_at: new Date().toISOString().split('T')[0],
     })
     setCompleting(null)
@@ -47,11 +49,13 @@ export function AseoClient({ tasks: initialTasks, recentLogs, aseoStock }: any) 
     setError('')
     if (!newTask.name.trim()) { setError('El nombre es obligatorio'); return }
     setSaving(true)
+    const { data: { user: u } } = await supabase.auth.getUser()
     const { data, error: err } = await supabase.from('cleaning_tasks').insert({
       name: newTask.name.trim(),
       frequency: newTask.frequency,
       preferred_day: newTask.preferred_day,
       duration_min: newTask.duration_min ? parseInt(newTask.duration_min) : null,
+      user_id: u?.id,
       products_needed: [],
       is_active: true,
     }).select().single()
