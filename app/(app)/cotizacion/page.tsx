@@ -13,7 +13,7 @@ export default async function CotizacionPage() {
   if (!user) return null
 
   const [products, suppliers] = await Promise.all([
-    getProducts(supabase, user.id),
+    getProducts(supabase as any, user.id),
     supabase
       .from('suppliers')
       .select('id, name, base_url, search_url_pattern')
