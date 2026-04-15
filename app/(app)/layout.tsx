@@ -1,12 +1,13 @@
 /**
  * app/(app)/layout.tsx
  * Layout para todas las rutas protegidas.
- * Incluye sidebar, header y verifica que el usuario esté autenticado.
+ * Incluye sidebar, header, widget del agente y verifica autenticación.
  */
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/modules/layout/Sidebar'
 import { Header } from '@/components/modules/layout/Header'
+import { AgenteWidget } from '@/components/modules/agente/AgenteWidget'
 
 export default async function AppLayout({
   children,
@@ -18,14 +19,12 @@ export default async function AppLayout({
 
   if (!user) redirect('/login')
 
-  // Obtener perfil del usuario
   const { data: profile } = await supabase
     .from('users')
     .select('name, preferences')
     .eq('id', user.id)
     .single()
 
-  // Si no tiene perfil, ir al onboarding
   if (!profile) redirect('/onboarding')
 
   return (
@@ -39,6 +38,8 @@ export default async function AppLayout({
           </div>
         </main>
       </div>
+      {/* Mesa de ayuda — accesible desde cualquier pantalla */}
+      <AgenteWidget />
     </div>
   )
 }

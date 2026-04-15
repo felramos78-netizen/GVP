@@ -69,6 +69,26 @@ const NAV_ITEMS = [
     ),
   },
   {
+    label: 'Compras',
+    href: '/compras',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 17h.01" />
+      </svg>
+    ),
+  },
+  {
+    label: 'Banco',
+    href: '/banco',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+      </svg>
+    ),
+  },
+  {
     label: 'Finanzas',
     href: '/finanzas',
     icon: (
@@ -103,7 +123,7 @@ export function Sidebar() {
               <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 110-16 8 8 0 010 16zm-1-11h2v6h-2zm0-4h2v2h-2z"/>
             </svg>
           </div>
-          <span className="font-semibold text-gray-900">Sistema Vida</span>
+          <span className="font-semibold text-gray-900">GDV</span>
         </div>
       </div>
 
