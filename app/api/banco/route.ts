@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
 
     // Clasificar con Gemini
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash-latest',
+      model: 'gemini-2.0-flash',
       generationConfig: { temperature: 0.1, maxOutputTokens: 3000 },
     })
 
