@@ -40,32 +40,42 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith('image/')) { setError('Solo se aceptan imágenes'); return }
     setError('')
-    const reader = new FileReader()
-    reader.onload = async (e) => {
-      const base64 = (e.target?.result as string).split(',')[1]
-      const previewUrl = e.target?.result as string
-      setPreview(previewUrl)
-      setStep('processing')
-      try {
-        const res = await fetch('/api/ai/boleta', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
-        })
-        if (!res.ok) throw new Error(await res.text())
-        const data = await res.json()
-        setBoleta(data)
-        setProductos(data.productos ?? [])
-        setGastoNotas(`Compra en ${data.comercio ?? 'comercio'} — ${data.fecha ?? 'hoy'}`)
-        setStep('preview')
-      } catch (err) {
-        setError('Error leyendo la boleta: ' + (err as Error).message)
-        setStep('upload')
-      }
-    }
-    reader.readAsDataURL(file)
-  }
+    
+    // Generar preview visual para el usuario
+    const previewUrl = URL.createObjectURL(file)
+    setPreview(previewUrl)
+    setStep('processing')
 
+    try {
+      // Creamos un FormData (más eficiente para enviar imágenes que base64)
+      const formData = new FormData()
+      formData.append('file', file)
+
+      // Apuntamos a nuestra nueva ruta de análisis con Gemini 1.5 Flash
+      const res = await fetch('/api/compras/analizar', {
+        method: 'POST',
+        body: formData, // Enviamos el archivo directamente
+      })
+
+      if (!res.ok) {
+        const errorText = await res.text()
+        throw new Error(errorText)
+      }
+
+      const data = await res.json()
+      
+      // Mapeamos los datos que devuelve la IA a los estados de tu componente
+      setBoleta(data)
+      setProductos(data.productos ?? [])
+      setGastoNotas(`Compra en ${data.comercio ?? 'comercio'} — ${data.fecha ?? 'hoy'}`)
+      setStep('preview')
+      
+    } catch (err) {
+      console.error("Error en handleFile:", err)
+      setError('Error leyendo la boleta: ' + (err as Error).message)
+      setStep('upload')
+    }
+  }
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragging(false)
