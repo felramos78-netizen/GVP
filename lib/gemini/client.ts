@@ -18,7 +18,7 @@ export const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
  */
 export function getPriceSearchModel() {
   return genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-lite-preview-06-17',
+    model: 'gemini-2.5-flash-lite',
     tools: [{ googleSearch: {} }],
     safetySettings: [
       {
@@ -39,7 +39,7 @@ export function getPriceSearchModel() {
  */
 export function getSuggestModel() {
   return genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-lite-preview-06-17',
+    model: 'gemini-2.5-flash-lite',
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 1024,
