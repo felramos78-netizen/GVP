@@ -127,7 +127,7 @@ Si necesitas ejecutar una acción, agrega al FINAL de tu respuesta:
 
     // Usar gemini-1.5-flash — mayor cuota gratuita
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
       generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
     })
