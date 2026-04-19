@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
     if (guardar_recetas && productIds.length > 0) {
       const nombresProductos = productos.map((p: any) => p.nombre_limpio).join(', ')
       const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.5-flash-lite-preview-06-17',
         generationConfig: { temperature: 0.7, maxOutputTokens: 3000 },
       })
 
