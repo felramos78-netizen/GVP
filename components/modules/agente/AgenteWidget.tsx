@@ -86,7 +86,7 @@ export function AgenteWidget() {
       const agentMsg: Message = { role: 'agent', content: data.response ?? '...', pending_action: data.pending_action ?? null, action_executed: data.action_executed ?? false, timestamp: new Date().toISOString() }
       setMessages(prev => [...prev, agentMsg])
       speak(agentMsg.content)
-      if (data.action_executed) setLastExecutedTool(data.result?.tool ?? 'acción')
+      if (data.action_executed) setLastExecutedTool(approvedAction?.tool ?? 'acción')
     } catch { setMessages(prev => [...prev, { role: 'agent', content: '❌ Error de conexión.', timestamp: new Date().toISOString() }]) }
     setLoading(false)
   }
