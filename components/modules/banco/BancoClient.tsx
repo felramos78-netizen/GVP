@@ -251,9 +251,25 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
     setSavingProv(false)
   }
 
-  const updateTxClass = async (txId: string, costCenterId: string) => {
-    await fetch('/api/banco', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tx_id: txId, cost_center_id: costCenterId }) })
-    setTxList((prev: any[]) => prev.map(t => t.id === txId ? { ...t, cost_center_id: costCenterId, cost_centers: costCenters.find((c: any) => c.id === costCenterId) } : t))
+  const updateTxFields = async (txId: string, fields: { cost_center_id?: string; supplier_id?: string }) => {
+    await fetch('/api/banco', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tx_id: txId, ...fields }),
+    })
+    setTxList((prev: any[]) => prev.map(t => {
+      if (t.id !== txId) return t
+      return {
+        ...t,
+        ...(fields.cost_center_id !== undefined && {
+          cost_center_id: fields.cost_center_id,
+          cost_centers: costCenters.find((c: any) => c.id === fields.cost_center_id),
+        }),
+        ...(fields.supplier_id !== undefined && {
+          supplier_id: fields.supplier_id,
+          suppliers: suppliers.find((s: any) => s.id === fields.supplier_id),
+        }),
+      }
+    }))
     setEditingTx(null)
   }
 
@@ -473,11 +489,38 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       )}
 
       {importStep === 'done' && (
-        <div className="card text-center">
-          <div className="text-3xl mb-2">🎉</div>
-          <div className="text-sm font-semibold text-gray-900 mb-1">{importResult?.inserted} movimientos importados</div>
-          <p className="text-xs text-gray-500 mb-3">Clasificados automáticamente por IA. Revisa y ajusta en la lista.</p>
-          <button onClick={() => { setImportStep('idle'); setTab('movimientos') }} className="btn">Ver movimientos</button>
+        <div className="card">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="text-2xl">✓</div>
+            <div>
+              <div className="text-sm font-semibold text-gray-900">{importResult?.inserted} movimientos importados</div>
+              <div className="text-xs text-gray-400">
+                {documentType === 'tarjeta_credito' ? 'Tarjeta de crédito' : 'Cartola'} · {pdfInstitution}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="bg-green-50 rounded-lg p-2 text-center">
+              <div className="text-lg font-bold text-green-700">{importResult?.inserted}</div>
+              <div className="text-xs text-green-600">Importados</div>
+            </div>
+            <div className="bg-blue-50 rounded-lg p-2 text-center">
+              <div className="text-lg font-bold text-blue-700">
+                {Object.values(matchMap).filter((m: any) => m && !m.es_nuevo).length}
+              </div>
+              <div className="text-xs text-blue-600">Prov. asociados</div>
+            </div>
+            <div className="bg-amber-50 rounded-lg p-2 text-center">
+              <div className="text-lg font-bold text-amber-700">
+                {Object.values(rowOverrides).filter((o: any) => o?.cost_center_id).length}
+              </div>
+              <div className="text-xs text-amber-600">Con centro asignado</div>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mb-3">Los centros sin asignar fueron clasificados automáticamente por IA.</p>
+          <button onClick={() => { setImportStep('idle'); setTab('movimientos') }} className="btn-primary w-full">
+            Ver movimientos
+          </button>
         </div>
       )}
 
@@ -520,7 +563,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       {tab === 'movimientos' && txList.length > 0 && importStep === 'idle' && (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2 items-center">
-            <input className="input max-w-xs text-sm" placeholder="Buscar movimiento..."
+            <input className="input max-w-xs text-sm" placeholder="Buscar movimiento o proveedor..."
               value={filter.search} onChange={e => setFilter(f => ({ ...f, search: e.target.value }))} />
             <div className="flex gap-1">
               {(['todos','gastos','ingresos'] as const).map(t => (
@@ -533,43 +576,88 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
               ))}
             </div>
           </div>
+
           <div className="card divide-y divide-gray-100">
             {filtered.length === 0
               ? <div className="text-center py-8 text-sm text-gray-400">Sin movimientos</div>
               : filtered.map((tx: any) => (
                 <div key={tx.id} className="py-3 flex items-start gap-3">
-                  <div className={cn('w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold',
-                    tx.amount < 0 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600')}>
-                    {tx.amount < 0 ? '↑' : '↓'}
+                  {/* Icono con tipo de documento */}
+                  <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                    <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold',
+                      tx.amount < 0 ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600')}>
+                      {tx.amount < 0 ? '↑' : '↓'}
+                    </div>
+                    {tx.document_type === 'tarjeta_credito' && (
+                      <span className="text-[9px] text-violet-500 font-medium leading-none">TC</span>
+                    )}
                   </div>
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-900 truncate">{tx.merchant_name ?? tx.description}</div>
-                        {tx.merchant_name && <div className="text-xs text-gray-400 truncate">{tx.description}</div>}
+                        <div className="text-sm font-medium text-gray-900 truncate">
+                          {tx.merchant_name ?? tx.description}
+                        </div>
+                        {tx.merchant_name && (
+                          <div className="text-xs text-gray-400 truncate">{tx.description}</div>
+                        )}
                         <div className="text-xs text-gray-400">{tx.transaction_date}</div>
                       </div>
-                      <div className={cn('text-sm font-semibold flex-shrink-0', tx.amount < 0 ? 'text-red-600' : 'text-green-600')}>
+                      <div className={cn('text-sm font-semibold flex-shrink-0',
+                        tx.amount < 0 ? 'text-red-600' : 'text-green-600')}>
                         {tx.amount < 0 ? '-' : '+'}${fmt(tx.amount)}
                       </div>
                     </div>
-                    <div className="mt-1.5">
+
+                    {/* Badges + edición inline */}
+                    <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
                       {editingTx === tx.id ? (
-                        <div className="flex gap-1">
-                          <select className="select text-xs py-0.5" defaultValue={tx.cost_center_id ?? ''}
-                            onChange={e => updateTxClass(tx.id, e.target.value)}>
+                        <>
+                          {/* Centro de costo */}
+                          <select className="select text-xs py-0.5"
+                            defaultValue={tx.cost_center_id ?? ''}
+                            onChange={e => updateTxFields(tx.id, { cost_center_id: e.target.value || undefined })}>
                             <option value="">Sin centro</option>
-                            {costCenters.map((c: any) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                            {costCenters.map((c: any) => (
+                              <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+                            ))}
                           </select>
-                          <button onClick={() => setEditingTx(null)} className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
-                        </div>
+                          {/* Proveedor */}
+                          <select className="select text-xs py-0.5"
+                            defaultValue={tx.supplier_id ?? ''}
+                            onChange={e => updateTxFields(tx.id, { supplier_id: e.target.value || undefined })}>
+                            <option value="">Sin proveedor</option>
+                            {suppliers.map((s: any) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                          <button onClick={() => setEditingTx(null)}
+                            className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
+                        </>
                       ) : (
-                        <button onClick={() => setEditingTx(tx.id)}
-                          className={cn('text-xs rounded-full px-2 py-0.5',
-                            tx.cost_centers ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                          )}>
-                          {tx.cost_centers ? `${tx.cost_centers.icon ?? ''} ${tx.cost_centers.name}` : '+ Clasificar'}
-                        </button>
+                        <>
+                          {/* Badge centro de costo */}
+                          <button onClick={() => setEditingTx(tx.id)}
+                            className={cn('text-xs rounded-full px-2 py-0.5 transition-colors',
+                              tx.cost_centers
+                                ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                            )}>
+                            {tx.cost_centers
+                              ? `${tx.cost_centers.icon ?? ''} ${tx.cost_centers.name}`
+                              : '+ Centro'}
+                          </button>
+                          {/* Badge proveedor */}
+                          <button onClick={() => setEditingTx(tx.id)}
+                            className={cn('text-xs rounded-full px-2 py-0.5 transition-colors',
+                              tx.suppliers
+                                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                : 'bg-gray-50 text-gray-400 hover:bg-gray-100'
+                            )}>
+                            {tx.suppliers ? tx.suppliers.name : '+ Proveedor'}
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
