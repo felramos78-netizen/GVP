@@ -32,10 +32,51 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
   const [guardarRecetas, setGuardarRecetas] = useState(true)
   const [gastoTipo, setGastoTipo] = useState<'puntual'|'presupuesto'>('puntual')
   const [costCenterId, setCostCenterId] = useState('')
+  const [costCenterSuggested, setCostCenterSuggested] = useState(false)
   const [gastoNotas, setGastoNotas] = useState('')
   const [resultado, setResultado] = useState<any>(null)
 
   const formatCLP = (n: number) => Math.round(n).toLocaleString('es-CL')
+
+  const suggestCostCenter = (comercio: string, productos: any[]): string => {
+    if (!costCenters.length) return ''
+    const cl = comercio.toLowerCase()
+
+    // Match por tipo de comercio
+    const merchantMap: [string[], string[]][] = [
+      [['farmacia','salcobrand','cruz verde','ahumada'], ['salud','farmacia','medicamento']],
+      [['jumbo','lider','líder','tottus','unimarc','walmart','santa isabel','acuenta','ekono'], ['aliment','comida','supermercado','mercado','despensa','alimentaci']],
+      [['sodimac','easy','ferretería','construmat'], ['hogar','ferret','construcci','manten']],
+      [['bip','metro','transantiago','red movil'], ['transporte','movilidad','locomoci']],
+      [['entel','claro','movistar','wom','vtr'], ['telefonía','internet','telecomunicaci','tecnolog']],
+    ]
+
+    for (const [merchantKws, centerKws] of merchantMap) {
+      if (merchantKws.some(k => cl.includes(k))) {
+        const match = costCenters.find((c: any) => centerKws.some(k => c.name.toLowerCase().includes(k)))
+        if (match) return match.id
+      }
+    }
+
+    // Match por tipo dominante de productos
+    const tipoCount: Record<string, number> = {}
+    productos.forEach((p: any) => { tipoCount[p.tipo] = (tipoCount[p.tipo] || 0) + 1 })
+    const dominantType = Object.entries(tipoCount).sort((a, b) => b[1] - a[1])[0]?.[0]
+
+    if (dominantType === 'aseo') {
+      const m = costCenters.find((c: any) => ['aseo','limpieza','hogar'].some(k => c.name.toLowerCase().includes(k)))
+      if (m) return m.id
+    }
+    if (dominantType === 'comestible' || dominantType === 'bebestible') {
+      const m = costCenters.find((c: any) =>
+        ['aliment','comida','supermercado','mercado','despensa','alimentaci'].some(k => c.name.toLowerCase().includes(k))
+      )
+      if (m) return m.id
+    }
+
+    // Fallback: primer centro variable
+    return costCenters.find((c: any) => c.type === 'variable')?.id || ''
+  }
 
   const handleFile = async (file: File) => {
     if (!file.type.startsWith('image/')) { setError('Solo se aceptan imágenes'); return }
@@ -68,6 +109,8 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
       setBoleta(data)
       setProductos(data.productos ?? [])
       setGastoNotas(`Compra en ${data.comercio ?? 'comercio'} — ${data.fecha ?? 'hoy'}`)
+      const suggested = suggestCostCenter(data.comercio ?? '', data.productos ?? [])
+      if (suggested) { setCostCenterId(suggested); setCostCenterSuggested(true) }
       setStep('preview')
       
     } catch (err) {
@@ -140,6 +183,8 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
     setProductos([])
     setResultado(null)
     setError('')
+    setCostCenterId('')
+    setCostCenterSuggested(false)
   }
 
   return (
@@ -346,9 +391,14 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
                           </div>
                         </div>
                         <div>
-                          <div className="text-xs text-gray-500 mb-1">Centro de costo (opcional)</div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="text-xs text-gray-500">Centro de costo</div>
+                            {costCenterSuggested && costCenterId && (
+                              <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full">✦ IA sugiere</span>
+                            )}
+                          </div>
                           <select className="select text-xs" value={costCenterId}
-                            onChange={e => setCostCenterId(e.target.value)}>
+                            onChange={e => { setCostCenterId(e.target.value); setCostCenterSuggested(false) }}>
                             <option value="">Sin asignar</option>
                             {costCenters.map((c: any) => (
                               <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
