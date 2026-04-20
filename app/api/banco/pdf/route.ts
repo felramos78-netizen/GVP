@@ -24,7 +24,7 @@ El documento puede ser:
 
 Responde SOLO con JSON válido, sin markdown, con esta estructura exacta:
 {
-  "document_type": "cartola" | "tarjeta_credito",
+  "document_type": "cartola",
   "institution": "nombre del banco",
   "period_from": "YYYY-MM-DD",
   "period_to": "YYYY-MM-DD",
@@ -33,11 +33,11 @@ Responde SOLO con JSON válido, sin markdown, con esta estructura exacta:
     {
       "fecha": "YYYY-MM-DD",
       "descripcion": "descripción completa tal como aparece",
-      "comercio": "nombre limpio del comercio/razón social (null si no aplica)",
+      "comercio": null,
       "cargo": 0,
       "abono": 0,
       "saldo": null,
-      "tipo": "compra" | "transferencia" | "cargo_bancario" | "pago" | "otro"
+      "tipo": "compra"
     }
   ]
 }
@@ -50,9 +50,69 @@ Reglas:
   Ej: "SUMUP * DELIMARKT SANTIAGO" → "Delimarket"
   Ej: "MERCADOPAGO *LAS3B Las Condes" → "MercadoPago"
   Ej: "INTERESES LINEA DE CREDITO" → null
+- tipo: "compra", "transferencia", "cargo_bancario", "pago" u "otro"
 - Incluye TODOS los movimientos, incluyendo cargos bancarios e intereses
 - No omitas ninguna transacción
 `
+
+// Repara JSON truncado por límite de tokens: cierra arrays y objetos abiertos
+function repairTruncatedJson(s: string): string {
+  s = s.replace(/```json|```/g, '').trim()
+  // Remover coma trailing si el JSON fue cortado después de un elemento
+  s = s.replace(/,\s*$/, '')
+
+  let braces = 0, brackets = 0, inString = false, escape = false
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (escape) { escape = false; continue }
+    if (c === '\\' && inString) { escape = true; continue }
+    if (c === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (c === '{') braces++
+    else if (c === '}') braces--
+    else if (c === '[') brackets++
+    else if (c === ']') brackets--
+  }
+  while (brackets > 0) { s += ']'; brackets-- }
+  while (braces > 0) { s += '}'; braces-- }
+  return s
+}
+
+// Intenta parsear JSON, reparando si está truncado
+function safeParseJson(raw: string): any {
+  const clean = raw.replace(/```json|```/g, '').trim()
+  const match = clean.match(/\{[\s\S]*/)
+  if (!match) return null
+
+  // Intento 1: parse directo (JSON completo)
+  try { return JSON.parse(match[0]) } catch {}
+
+  // Intento 2: reparar JSON truncado
+  try { return JSON.parse(repairTruncatedJson(match[0])) } catch {}
+
+  return null
+}
+
+// Retry con backoff exponencial para errores 503 de Gemini
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let delay = 2000
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      const msg = (err as Error).message ?? ''
+      const isRetryable = msg.includes('503') || msg.includes('overloaded') ||
+        msg.includes('Service Unavailable') || msg.includes('UNAVAILABLE')
+      if (attempt < maxRetries && isRetryable) {
+        await new Promise(r => setTimeout(r, delay))
+        delay *= 2
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error('Max retries exceeded')
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -76,28 +136,28 @@ export async function POST(request: NextRequest) {
 
     const base64 = Buffer.from(buffer).toString('base64')
 
+    // gemini-2.5-flash soporta hasta 65536 tokens de salida (vs 8192 de flash-lite)
+    // lo que permite extraer cartolas grandes sin truncar el JSON
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
-      generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
+      model: 'gemini-2.5-flash',
+      generationConfig: { temperature: 0.1, maxOutputTokens: 65536 },
     })
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: 'application/pdf',
-          data: base64,
-        },
-      },
-      EXTRACTION_PROMPT,
-    ])
+    const result = await withRetry(() =>
+      model.generateContent([
+        { inlineData: { mimeType: 'application/pdf', data: base64 } },
+        EXTRACTION_PROMPT,
+      ])
+    )
 
-    const raw = result.response.text().replace(/```json|```/g, '').trim()
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return NextResponse.json({ error: 'No se pudo extraer la información del PDF' }, { status: 422 })
+    const raw = result.response.text()
+    const parsed = safeParseJson(raw)
+
+    if (!parsed) {
+      console.error('PDF parse failed, raw preview:', raw.slice(0, 500))
+      return NextResponse.json({ error: 'No se pudo extraer la información del PDF. Verifica que sea una cartola o estado de cuenta válido.' }, { status: 422 })
     }
 
-    const parsed = JSON.parse(jsonMatch[0])
     const transactions = (parsed.transactions ?? []).map((tx: any) => ({
       fecha: tx.fecha ?? '',
       descripcion: tx.descripcion ?? '',
@@ -119,6 +179,10 @@ export async function POST(request: NextRequest) {
 
   } catch (err) {
     console.error('PDF extraction error:', err)
+    const msg = (err as Error).message ?? ''
+    if (msg.includes('503') || msg.includes('Service Unavailable') || msg.includes('overloaded')) {
+      return NextResponse.json({ error: 'El servicio de IA está saturado temporalmente. Intenta nuevamente en unos segundos.' }, { status: 503 })
+    }
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }
 }

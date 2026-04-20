@@ -28,14 +28,14 @@ export async function POST(request: NextRequest) {
       .eq('user_id', user.id)
       .eq('is_active', true)
 
-    // Clasificar con Gemini solo los que no tienen cost_center_id
-    const toClassify = rows.slice(0, 100).filter((r: any) => !r.cost_center_id)
+    // Clasificar con Gemini solo los que no tienen cost_center_id (máx 500 filas)
+    const toClassify = rows.slice(0, 500).filter((r: any) => !r.cost_center_id)
     let clasificaciones: any[] = []
 
     if (toClassify.length > 0 && costCenters?.length) {
       const model = genAI.getGenerativeModel({
         model: 'gemini-2.5-flash-lite',
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
       })
 
       const centersDesc = costCenters.map((c: any) => `${c.id}|${c.name}`).join(', ')
@@ -121,7 +121,7 @@ Responde SOLO con JSON (sin markdown):
     let classifyIdx = 0
     let inserted = 0
 
-    for (let i = 0; i < rows.slice(0, 100).length; i++) {
+    for (let i = 0; i < rows.slice(0, 500).length; i++) {
       const row = rows[i]
       const amount = row.cargo ? -Math.abs(row.cargo) : Math.abs(row.abono ?? 0)
       const txId = `manual_${user.id}_${row.fecha}_${i}`

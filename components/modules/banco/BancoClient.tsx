@@ -65,7 +65,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
         saldo: tx.saldo ?? null,
       }))
 
-      if (rows.length === 0) throw new Error('No se encontraron movimientos en el PDF.')
+      if (rows.length === 0) throw new Error('No se encontraron movimientos en el PDF. Verifica que sea una cartola o estado de cuenta válido con transacciones.')
 
       setDocumentType(data.document_type ?? 'cartola')
       setPdfInstitution(data.institution ?? 'Banco de Chile')
@@ -117,31 +117,32 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
 
       // Detectar fila de cabecera buscando palabras clave
-      const headerKeywords = ['fecha', 'descripcion', 'descripción', 'cargo', 'abono', 'saldo', 'monto']
+      const headerKeywords = ['fecha', 'descripcion', 'descripción', 'cargo', 'abono', 'saldo', 'monto', 'glosa', 'debe', 'haber']
       let headerIdx = 0
-      for (let i = 0; i < Math.min(10, raw.length); i++) {
+      for (let i = 0; i < Math.min(15, raw.length); i++) {
         const row = raw[i].map((c: any) => String(c).toLowerCase())
-        if (headerKeywords.some(k => row.some((c: string) => c.includes(k)))) {
+        if (headerKeywords.filter(k => row.some((c: string) => c.includes(k))).length >= 2) {
           headerIdx = i; break
         }
       }
 
-      const headers = raw[headerIdx].map((h: any) => String(h).toLowerCase().trim())
+      const headers = raw[headerIdx].map((h: any) => String(h).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim())
       const dataRows = raw.slice(headerIdx + 1).filter((r: any[]) => r.some(c => c !== ''))
 
-      // Mapear columnas flexiblemente
+      // Mapear columnas flexiblemente (normaliza tildes para comparar)
+      const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       const col = (keys: string[]) => {
         for (const k of keys) {
-          const idx = headers.findIndex((h: string) => h.includes(k))
+          const idx = headers.findIndex((h: string) => h.includes(normalize(k)))
           if (idx >= 0) return idx
         }
         return -1
       }
 
-      const fechaIdx = col(['fecha', 'date'])
-      const descIdx = col(['descripcion', 'descripción', 'glosa', 'concepto', 'detalle'])
-      const cargoIdx = col(['cargo', 'débito', 'debito', 'egreso'])
-      const abonoIdx = col(['abono', 'crédito', 'credito', 'ingreso'])
+      const fechaIdx = col(['fecha', 'date', 'fec'])
+      const descIdx = col(['descripcion', 'glosa', 'concepto', 'detalle', 'descripci', 'movimiento', 'operacion'])
+      const cargoIdx = col(['cargo', 'debito', 'debe', 'egreso', 'retiro', 'gasto'])
+      const abonoIdx = col(['abono', 'credito', 'haber', 'ingreso', 'deposito'])
       const saldoIdx = col(['saldo', 'balance'])
 
       const parseNum = (v: any) => {
@@ -172,9 +173,20 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
           saldo: saldoIdx >= 0 ? parseNum(r[saldoIdx]) : 0,
         }))
         .filter(r => r.fecha && r.descripcion && (r.cargo > 0 || r.abono > 0))
-        .slice(0, 100)
+        .slice(0, 500)
 
-      if (rows.length === 0) throw new Error('No se encontraron movimientos. Verifica que el archivo sea el correcto.')
+      if (rows.length === 0) {
+        const colsFound = [
+          fechaIdx >= 0 ? 'fecha' : null,
+          descIdx >= 0 ? 'descripción' : null,
+          cargoIdx >= 0 ? 'cargo' : null,
+          abonoIdx >= 0 ? 'abono' : null,
+        ].filter(Boolean)
+        const hint = colsFound.length < 2
+          ? 'No se detectaron columnas bancarias estándar. Asegúrate de exportar desde tu banco incluyendo columnas de fecha, descripción y monto.'
+          : 'Se detectaron columnas pero no se encontraron montos válidos. Verifica que el archivo tenga datos con cargos o abonos.'
+        throw new Error(hint)
+      }
 
       setDocumentType('cartola')
       setParsedRows(rows)
