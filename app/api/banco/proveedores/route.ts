@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
 
       if (unmatched.length > 0) {
         const suppliersDesc = (suppliers ?? [])
-          .map(s => `${s.id}|${s.name}|${s.type}`)
+          .map((s: any) => `${s.id}|${s.name}|${s.type}`)
           .join('\n')
 
         const prompt = `Cruza estas descripciones bancarias chilenas con la lista de proveedores existentes.
