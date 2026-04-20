@@ -6,44 +6,100 @@ import { formatCLP, formatPercent, cn } from '@/lib/utils/formatters'
 
 const ICONOS = ['🏠','🚗','🛒','💊','🐱','📡','🎬','🎵','✂️','🍻','🛡','📚','👕','⚡','🚇','💰','🏦','🌱','🎯','💪','🏥','✈️','🎮','📱','🍕']
 
+type CenterForm = {
+  name: string
+  icon: string
+  type: string
+  monthly_amount: string
+  description: string
+  color: string
+}
+
+const EMPTY_FORM: CenterForm = {
+  name: '', icon: '💰', type: 'variable', monthly_amount: '', description: '', color: '#185FA5',
+}
+
 export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth }: any) {
   const router = useRouter()
   const supabase = createClient()
   const [centers, setCenters] = useState(costCenters)
-  const [showNew, setShowNew] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState<CenterForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [newCenter, setNewCenter] = useState({
-    name: '', icon: '💰', type: 'gasto_fijo', monthly_amount: '', description: '', color: '#185FA5'
-  })
+  const [calculatingAhorro, setCalculatingAhorro] = useState(false)
+  const [ahorroResult, setAhorroResult] = useState<{ total: number; detalle: { name: string; ahorro: number }[] } | null>(null)
 
   const totalAssigned = centers.reduce((s: number, c: any) => s + (c.monthly_amount ?? 0), 0)
   const free = income - totalAssigned
   const budgetMap = new Map(budgets.map((b: any) => [b.cost_center_id, b]))
+  const savingsCenter = centers.find((c: any) => c.type === 'ahorro')
 
-  const handleAddCenter = async () => {
+  const openNew = () => {
+    setForm(EMPTY_FORM)
+    setEditingId(null)
     setError('')
-    if (!newCenter.name.trim()) { setError('El nombre es obligatorio'); return }
-    if (!newCenter.monthly_amount || isNaN(parseInt(newCenter.monthly_amount))) { setError('El monto debe ser un número'); return }
+    setShowModal(true)
+  }
+
+  const openEdit = (c: any) => {
+    setForm({
+      name: c.name,
+      icon: c.icon ?? '💰',
+      type: c.type,
+      monthly_amount: String(c.monthly_amount),
+      description: c.description ?? '',
+      color: c.color ?? '#185FA5',
+    })
+    setEditingId(c.id)
+    setError('')
+    setShowModal(true)
+  }
+
+  const handleSave = async () => {
+    setError('')
+    if (!form.name.trim()) { setError('El nombre es obligatorio'); return }
+    if (!form.monthly_amount || isNaN(parseInt(form.monthly_amount))) { setError('El monto debe ser un número'); return }
     setSaving(true)
+
     const { data: { user: u } } = await supabase.auth.getUser()
-    const { data, error: err } = await supabase.from('cost_centers').insert({
-      name: newCenter.name.trim(),
-      icon: newCenter.icon,
-      type: newCenter.type,
-      monthly_amount: parseInt(newCenter.monthly_amount),
-      description: newCenter.description || null,
-      color: newCenter.color,
-      user_id: u?.id,
-      sort_order: centers.length,
-      is_active: true,
-    }).select().single()
-    setSaving(false)
-    if (err) { setError('Error al guardar: ' + err.message); return }
-    if (data) {
-      setCenters((prev: any) => [...prev, data])
-      setNewCenter({ name: '', icon: '💰', type: 'gasto_fijo', monthly_amount: '', description: '', color: '#185FA5' })
-      setShowNew(false)
+    const payload = {
+      name: form.name.trim(),
+      icon: form.icon,
+      type: form.type,
+      monthly_amount: parseInt(form.monthly_amount),
+      description: form.description || null,
+      color: form.color,
+    }
+
+    if (editingId) {
+      const { data, error: err } = await supabase
+        .from('cost_centers')
+        .update(payload)
+        .eq('id', editingId)
+        .eq('user_id', u?.id ?? '')
+        .select()
+        .single()
+      setSaving(false)
+      if (err) { setError('Error al guardar: ' + err.message); return }
+      if (data) {
+        setCenters((prev: any) => prev.map((c: any) => c.id === editingId ? { ...c, ...data } : c))
+        setShowModal(false)
+      }
+    } else {
+      const { data, error: err } = await supabase.from('cost_centers').insert({
+        ...payload,
+        user_id: u?.id,
+        sort_order: centers.length,
+        is_active: true,
+      }).select().single()
+      setSaving(false)
+      if (err) { setError('Error al guardar: ' + err.message); return }
+      if (data) {
+        setCenters((prev: any) => [...prev, data])
+        setShowModal(false)
+      }
     }
   }
 
@@ -53,9 +109,40 @@ export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth
     setCenters((prev: any) => prev.filter((c: any) => c.id !== id))
   }
 
+  const handleMove = async (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir
+    if (newIdx < 0 || newIdx >= centers.length) return
+    const updated = [...centers]
+    ;[updated[idx], updated[newIdx]] = [updated[newIdx], updated[idx]]
+    const { data: { user: u } } = await supabase.auth.getUser()
+    await Promise.all([
+      supabase.from('cost_centers').update({ sort_order: newIdx }).eq('id', updated[newIdx].id).eq('user_id', u?.id ?? ''),
+      supabase.from('cost_centers').update({ sort_order: idx }).eq('id', updated[idx].id).eq('user_id', u?.id ?? ''),
+    ])
+    setCenters(updated.map((c: any, i: number) => ({ ...c, sort_order: i })))
+  }
+
   const handleIncomeUpdate = async (value: number) => {
-    await supabase.from('users').update({ monthly_income: value }).eq('id', (await supabase.auth.getUser()).data.user?.id ?? '')
+    const { data: { user: u } } = await supabase.auth.getUser()
+    await supabase.from('users').update({ monthly_income: value }).eq('id', u?.id ?? '')
     router.refresh()
+  }
+
+  const handleCalcularAhorro = async () => {
+    if (!savingsCenter) return
+    setCalculatingAhorro(true)
+    setAhorroResult(null)
+    const res = await fetch('/api/finanzas/calcular-ahorro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ yearMonth, savingsCenterId: savingsCenter.id }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setAhorroResult(data)
+      router.refresh()
+    }
+    setCalculatingAhorro(false)
   }
 
   return (
@@ -94,12 +181,44 @@ export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth
         </div>
       </div>
 
+      {/* Banner centro Ahorros */}
+      {savingsCenter && (
+        <div className="card bg-teal-50 border border-teal-200">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-teal-800">
+                <span>{savingsCenter.icon}</span>
+                <span>Centro de Ahorros: {savingsCenter.name}</span>
+              </div>
+              <p className="text-xs text-teal-600 mt-0.5">
+                Al calcular, el presupuesto no consumido de los demás centros se registrará aquí como ahorro generado.
+              </p>
+              {ahorroResult && (
+                <div className="mt-2 flex flex-col gap-0.5">
+                  <span className="text-sm font-semibold text-teal-800">Ahorro del mes: {formatCLP(ahorroResult.total)}</span>
+                  {ahorroResult.detalle.map((d, i) => (
+                    <span key={i} className="text-xs text-teal-600">· {d.name}: {formatCLP(d.ahorro)}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={handleCalcularAhorro}
+              disabled={calculatingAhorro}
+              className="btn-primary btn-sm whitespace-nowrap flex-shrink-0"
+            >
+              {calculatingAhorro ? 'Calculando...' : '💰 Calcular ahorro del mes'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Barra distribución */}
       {income > 0 && centers.length > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-700">Distribución del ingreso</h2>
-            <button onClick={() => setShowNew(true)} className="btn-primary btn-sm">+ Nuevo centro</button>
+            <button onClick={openNew} className="btn-primary btn-sm">+ Nuevo centro</button>
           </div>
           <div className="flex h-4 rounded-full overflow-hidden gap-0.5 mb-3">
             {centers.map((c: any) => (
@@ -119,96 +238,150 @@ export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth
         </div>
       )}
 
-      {/* Botón si no hay centros */}
+      {/* Sin centros */}
       {centers.length === 0 && (
         <div className="card text-center py-10">
           <p className="text-sm text-gray-400 mb-3">Sin centros de costo configurados.</p>
-          <button onClick={() => setShowNew(true)} className="btn-primary mx-auto">+ Crear primer centro</button>
+          <button onClick={openNew} className="btn-primary mx-auto">+ Crear primer centro</button>
         </div>
       )}
 
       {/* Grid de centros */}
       {centers.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {centers.map((c: any) => {
+          {centers.map((c: any, idx: number) => {
             const budget = budgetMap.get(c.id)
             const spent = budget?.spent ?? 0
+            const isSavings = c.type === 'ahorro'
             const pct = c.monthly_amount > 0 ? Math.min(100, Math.round(spent / c.monthly_amount * 100)) : 0
-            const over = spent > c.monthly_amount
+            const over = !isSavings && spent > c.monthly_amount
+            const remaining = c.monthly_amount - spent
+
             return (
-              <div key={c.id} className="card flex flex-col gap-3">
+              <div key={c.id} className={cn('card flex flex-col gap-3', isSavings && 'ring-2 ring-teal-300')}>
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-2xl">{c.icon}</span>
                     <div>
-                      <div className="font-medium text-sm text-gray-900">{c.name}</div>
+                      <div className="font-medium text-sm text-gray-900 flex items-center gap-1">
+                        {c.name}
+                        {isSavings && <span className="text-xs px-1.5 py-0.5 bg-teal-100 text-teal-700 rounded-full">Ahorros</span>}
+                      </div>
                       {c.description && <div className="text-xs text-gray-400">{c.description}</div>}
                     </div>
                   </div>
                   <div className="flex gap-1 items-center">
-                    <span className="badge-neutral text-xs capitalize">{c.type.replace('_', ' ')}</span>
-                    <button onClick={() => handleDelete(c.id)} className="text-gray-300 hover:text-red-500 text-sm ml-1">×</button>
+                    {/* Reordenar */}
+                    <div className="flex flex-col">
+                      <button
+                        onClick={() => handleMove(idx, -1)}
+                        disabled={idx === 0}
+                        className="text-gray-300 hover:text-gray-600 disabled:opacity-20 leading-none text-xs px-0.5"
+                        title="Subir"
+                      >▲</button>
+                      <button
+                        onClick={() => handleMove(idx, 1)}
+                        disabled={idx === centers.length - 1}
+                        className="text-gray-300 hover:text-gray-600 disabled:opacity-20 leading-none text-xs px-0.5"
+                        title="Bajar"
+                      >▼</button>
+                    </div>
+                    <button onClick={() => openEdit(c)} className="text-gray-300 hover:text-blue-500 text-sm px-1" title="Editar">✎</button>
+                    <button onClick={() => handleDelete(c.id)} className="text-gray-300 hover:text-red-500 text-sm px-1" title="Eliminar">×</button>
                   </div>
                 </div>
-                <div className="flex justify-between items-baseline">
-                  <span className={cn('text-xl font-semibold', over ? 'text-red-600' : 'text-gray-900')}>{formatCLP(spent)}</span>
-                  <span className="text-xs text-gray-400">de {formatCLP(c.monthly_amount)}</span>
-                </div>
-                <div>
-                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: over ? '#DC2626' : c.color }} />
-                  </div>
-                  <div className="flex justify-between mt-1">
-                    <span className="text-xs text-gray-400">{pct}% utilizado</span>
-                    {over && <span className="text-xs text-red-600 font-medium">Sobre presupuesto</span>}
-                  </div>
-                </div>
+
+                {isSavings ? (
+                  /* Tarjeta especial para centro Ahorros */
+                  <>
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xl font-semibold text-teal-600">{formatCLP(spent)}</span>
+                      <span className="text-xs text-gray-400">meta {formatCLP(c.monthly_amount)}</span>
+                    </div>
+                    <div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all bg-teal-400" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-xs text-gray-400">Ahorro acumulado</span>
+                        <span className="text-xs text-teal-600 font-medium">{pct}% de meta</span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  /* Tarjeta normal */
+                  <>
+                    <div className="flex justify-between items-baseline">
+                      <span className={cn('text-xl font-semibold', over ? 'text-red-600' : 'text-gray-900')}>{formatCLP(spent)}</span>
+                      <span className="text-xs text-gray-400">de {formatCLP(c.monthly_amount)}</span>
+                    </div>
+                    <div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: over ? '#DC2626' : c.color }} />
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-xs text-gray-400">{pct}% utilizado</span>
+                        {over
+                          ? <span className="text-xs text-red-600 font-medium">Sobre presupuesto</span>
+                          : <span className="text-xs text-gray-400">Quedan {formatCLP(remaining)}</span>
+                        }
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )
           })}
-          <button onClick={() => setShowNew(true)} className="card border-dashed border-2 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:border-gray-400 min-h-[120px] transition-colors">
+          <button onClick={openNew} className="card border-dashed border-2 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:border-gray-400 min-h-[120px] transition-colors">
             <span className="text-3xl mr-2">+</span> Nuevo centro
           </button>
         </div>
       )}
 
-      {/* Modal nuevo centro */}
-      {showNew && (
+      {/* Modal crear / editar */}
+      {showModal && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl border border-gray-200 p-6 w-full max-w-md shadow-xl">
-            <h3 className="text-base font-semibold text-gray-900 mb-4">Nuevo centro de costo</h3>
+            <h3 className="text-base font-semibold text-gray-900 mb-4">
+              {editingId ? 'Editar centro de costo' : 'Nuevo centro de costo'}
+            </h3>
             {error && <div className="text-red-600 text-sm mb-3 bg-red-50 rounded-lg px-3 py-2">{error}</div>}
             <div className="flex flex-col gap-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Nombre *</label>
-                  <input className="input" placeholder="Ej: Arriendo" value={newCenter.name}
-                    onChange={e => setNewCenter(p => ({ ...p, name: e.target.value }))} />
+                  <input className="input" placeholder="Ej: Arriendo" value={form.name}
+                    onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
                 </div>
                 <div>
                   <label className="label">Tipo *</label>
-                  <select className="select" value={newCenter.type}
-                    onChange={e => setNewCenter(p => ({ ...p, type: e.target.value }))}>
+                  <select className="select" value={form.type}
+                    onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
                     <option value="gasto_fijo">Gasto fijo</option>
                     <option value="variable">Variable</option>
-                    <option value="ahorro">Ahorro</option>
+                    <option value="ahorro">Ahorros ✦</option>
                     <option value="meta">Meta / Fondo</option>
                   </select>
                 </div>
               </div>
+              {form.type === 'ahorro' && (
+                <div className="bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 text-xs text-teal-700">
+                  ✦ Al calcular el ahorro mensual, el presupuesto no consumido de los demás centros se acumulará aquí automáticamente.
+                </div>
+              )}
               <div>
                 <label className="label">Monto mensual (CLP) *</label>
-                <input className="input" type="number" placeholder="540000" value={newCenter.monthly_amount}
-                  onChange={e => setNewCenter(p => ({ ...p, monthly_amount: e.target.value }))} />
+                <input className="input" type="number" placeholder="540000" value={form.monthly_amount}
+                  onChange={e => setForm(p => ({ ...p, monthly_amount: e.target.value }))} />
               </div>
               <div>
                 <label className="label">Ícono</label>
                 <div className="flex flex-wrap gap-2 mt-1">
                   {ICONOS.map(ico => (
                     <button key={ico} type="button"
-                      onClick={() => setNewCenter(p => ({ ...p, icon: ico }))}
+                      onClick={() => setForm(p => ({ ...p, icon: ico }))}
                       className={cn('text-xl p-1 rounded-lg border-2 transition-all',
-                        newCenter.icon === ico ? 'border-gray-900 bg-gray-50' : 'border-transparent hover:border-gray-200'
+                        form.icon === ico ? 'border-gray-900 bg-gray-50' : 'border-transparent hover:border-gray-200'
                       )}>
                       {ico}
                     </button>
@@ -217,22 +390,22 @@ export function FinanzasClient({ income, payDay, costCenters, budgets, yearMonth
               </div>
               <div>
                 <label className="label">Descripción (opcional)</label>
-                <input className="input" placeholder="Ej: Depto Ñuñoa" value={newCenter.description}
-                  onChange={e => setNewCenter(p => ({ ...p, description: e.target.value }))} />
+                <input className="input" placeholder="Ej: Depto Ñuñoa" value={form.description}
+                  onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
               </div>
               <div>
                 <label className="label">Color</label>
                 <div className="flex gap-2 items-center mt-1">
                   <input type="color" className="h-9 w-16 rounded border border-gray-200 cursor-pointer"
-                    value={newCenter.color} onChange={e => setNewCenter(p => ({ ...p, color: e.target.value }))} />
-                  <span className="text-xs text-gray-400">{newCenter.color}</span>
+                    value={form.color} onChange={e => setForm(p => ({ ...p, color: e.target.value }))} />
+                  <span className="text-xs text-gray-400">{form.color}</span>
                 </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-5">
-              <button onClick={() => { setShowNew(false); setError('') }} className="btn">Cancelar</button>
-              <button onClick={handleAddCenter} disabled={saving} className="btn-primary">
-                {saving ? 'Guardando...' : 'Crear centro'}
+              <button onClick={() => { setShowModal(false); setError('') }} className="btn">Cancelar</button>
+              <button onClick={handleSave} disabled={saving} className="btn-primary">
+                {saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear centro'}
               </button>
             </div>
           </div>
