@@ -11,6 +11,8 @@ import { startOfWeek } from 'date-fns'
 import { MetricCards } from '@/components/modules/dashboard/MetricCards'
 import { WeekPreview } from '@/components/modules/dashboard/WeekPreview'
 import { StockAlerts } from '@/components/modules/dashboard/StockAlerts'
+import { ProgressCard } from '@/components/modules/dashboard/ProgressCard'
+import { SessionCalendar } from '@/components/modules/dashboard/SessionCalendar'
 
 export default async function DashboardPage() {
   const supabase = createClient()
@@ -57,6 +59,9 @@ export default async function DashboardPage() {
         alertCount={alerts.length}
       />
 
+      {/* Plan de acción y progreso */}
+      <ProgressCard />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Semana actual */}
         <div className="lg:col-span-2">
@@ -68,6 +73,9 @@ export default async function DashboardPage() {
           <StockAlerts alerts={alerts} />
         </div>
       </div>
+
+      {/* Calendario de sesiones */}
+      <SessionCalendar />
     </div>
   )
 }
