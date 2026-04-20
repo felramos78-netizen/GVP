@@ -29,6 +29,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
   const [editingTx, setEditingTx] = useState<string|null>(null)
   const [filter, setFilter] = useState({ search: '', type: 'todos' })
 
+  // ── Cruce de proveedores ──────────────────────────────────────────────────
+  // matchMap: clave = (comercio || descripcion) → { supplier_id, nombre_sugerido, tipo_sugerido, es_nuevo }
+  const [matchMap, setMatchMap] = useState<Record<string, any>>({})
+  const [matchingProviders, setMatchingProviders] = useState(false)
+  // rowOverrides: índice de fila → { supplier_id?, cost_center_id?, nombre_proveedor? }
+  const [rowOverrides, setRowOverrides] = useState<Record<number, any>>({})
+  // Mini-form para crear proveedor nuevo inline
+  const [newProvForm, setNewProvForm] = useState<{ idx: number; nombre: string; tipo: string } | null>(null)
+  const [savingProv, setSavingProv] = useState(false)
+
   const hasConnection = connections.length > 0
   const allAccounts = connections.flatMap((c: any) => c.bank_accounts ?? [])
   const totalBalance = allAccounts.reduce((a: number, acc: any) => a + (acc.balance_available ?? 0), 0)
@@ -61,10 +71,33 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       setPdfInstitution(data.institution ?? 'Banco de Chile')
       setParsedRows(rows)
       setImportStep('preview')
+      fetchProviderMatches(rows)
     } catch (err) {
       setError((err as Error).message)
       setImportStep('idle')
     }
+  }, [])
+
+  // Cruzar descripciones con proveedores existentes via IA
+  const fetchProviderMatches = useCallback(async (rows: any[]) => {
+    setMatchingProviders(true)
+    setMatchMap({})
+    setRowOverrides({})
+    try {
+      const descriptions = [...new Set(rows.map((r: any) => r.comercio || r.descripcion))]
+      const res = await fetch('/api/banco/proveedores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'match', descriptions }),
+      })
+      const data = await res.json()
+      const map: Record<string, any> = {}
+      for (const m of (data.matches ?? [])) {
+        map[m.description] = m
+      }
+      setMatchMap(map)
+    } catch { /* si falla, se importa sin proveedor */ }
+    setMatchingProviders(false)
   }, [])
 
   // Parsear archivo Excel o CSV del banco
@@ -146,6 +179,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       setDocumentType('cartola')
       setParsedRows(rows)
       setImportStep('preview')
+      fetchProviderMatches(rows)
     } catch (err) {
       setError((err as Error).message)
       setImportStep('idle')
@@ -161,9 +195,22 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
   const handleImport = async () => {
     setImporting(true); setError('')
     try {
+      // Fusionar matches de proveedores + overrides manuales en cada fila
+      const enrichedRows = parsedRows.map((row, i) => {
+        const key = row.comercio || row.descripcion
+        const match = matchMap[key]
+        const override = rowOverrides[i] ?? {}
+        return {
+          ...row,
+          supplier_id: override.supplier_id ?? (match?.es_nuevo ? null : match?.supplier_id ?? null),
+          cost_center_id: override.cost_center_id ?? null,
+          comercio: override.nombre_proveedor ?? row.comercio,
+        }
+      })
+
       const res = await fetch('/api/banco', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: parsedRows, institution: pdfInstitution, document_type: documentType }),
+        body: JSON.stringify({ rows: enrichedRows, institution: pdfInstitution, document_type: documentType }),
       })
       const data = await res.json()
       if (data.ok) {
@@ -175,6 +222,33 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       }
     } catch { setError('Error de conexión') }
     setImporting(false)
+  }
+
+  // Crear proveedor desde el mini-form inline y asignarlo a la fila
+  const handleCreateProvider = async () => {
+    if (!newProvForm) return
+    setSavingProv(true)
+    try {
+      const originalKey = parsedRows[newProvForm.idx].comercio || parsedRows[newProvForm.idx].descripcion
+      const res = await fetch('/api/banco/proveedores', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          nombre: newProvForm.nombre,
+          tipo: newProvForm.tipo,
+          aliases: [originalKey],
+        }),
+      })
+      const data = await res.json()
+      if (data.supplier) {
+        // Actualizar matchMap para reutilizar en otras filas con la misma descripción
+        const key = parsedRows[newProvForm.idx].comercio || parsedRows[newProvForm.idx].descripcion
+        setMatchMap(prev => ({ ...prev, [key]: { supplier_id: data.supplier.id, nombre_sugerido: data.supplier.name, es_nuevo: false, confianza: 1 } }))
+        setRowOverrides(prev => ({ ...prev, [newProvForm.idx]: { ...prev[newProvForm.idx], supplier_id: data.supplier.id, nombre_proveedor: data.supplier.name } }))
+      }
+      setNewProvForm(null)
+    } catch {}
+    setSavingProv(false)
   }
 
   const updateTxClass = async (txId: string, costCenterId: string) => {
@@ -251,30 +325,147 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                 </div>
                 <button onClick={() => setImportStep('idle')} className="btn btn-sm">Cancelar</button>
               </div>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto mb-4">
+              {/* Indicador de carga del matching */}
+              {matchingProviders && (
+                <div className="flex items-center gap-2 text-xs text-gray-500 mb-3 bg-gray-50 rounded-lg px-3 py-2">
+                  <span className="animate-spin">⚙️</span>
+                  Cruzando proveedores con IA...
+                </div>
+              )}
+
+              <div className="overflow-x-auto max-h-[420px] overflow-y-auto mb-4 border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-white">
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-1.5 px-2 text-gray-500">Fecha</th>
-                      <th className="text-left py-1.5 px-2 text-gray-500">Descripción</th>
-                      <th className="text-right py-1.5 px-2 text-gray-500">Cargo</th>
-                      <th className="text-right py-1.5 px-2 text-gray-500">Abono</th>
+                  <thead className="sticky top-0 bg-white border-b border-gray-200 z-10">
+                    <tr>
+                      <th className="text-left py-2 px-2 text-gray-500 font-medium">Fecha</th>
+                      <th className="text-left py-2 px-2 text-gray-500 font-medium">Descripción</th>
+                      <th className="text-left py-2 px-2 text-gray-500 font-medium">Proveedor</th>
+                      <th className="text-left py-2 px-2 text-gray-500 font-medium">Centro de costo</th>
+                      <th className="text-right py-2 px-2 text-gray-500 font-medium">Monto</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {parsedRows.map((r, i) => (
-                      <tr key={i} className="border-b border-gray-50">
-                        <td className="py-1.5 px-2 text-gray-500">{r.fecha}</td>
-                        <td className="py-1.5 px-2 font-medium text-gray-800 max-w-[200px] truncate">{r.descripcion}</td>
-                        <td className="py-1.5 px-2 text-right text-red-600">{r.cargo > 0 ? `$${fmt(r.cargo)}` : ''}</td>
-                        <td className="py-1.5 px-2 text-right text-green-600">{r.abono > 0 ? `$${fmt(r.abono)}` : ''}</td>
-                      </tr>
-                    ))}
+                    {parsedRows.map((r, i) => {
+                      const key = r.comercio || r.descripcion
+                      const match = matchMap[key]
+                      const override = rowOverrides[i] ?? {}
+                      const supplierId = override.supplier_id ?? (match?.es_nuevo ? null : match?.supplier_id ?? null)
+                      const supplierName = override.nombre_proveedor ?? (match?.nombre_sugerido ?? null)
+                      const isNew = !supplierId && !!supplierName
+                      const isMatched = !!supplierId
+
+                      return (
+                        <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50">
+                          <td className="py-2 px-2 text-gray-400 whitespace-nowrap">{r.fecha}</td>
+                          <td className="py-2 px-2 max-w-[180px]">
+                            <div className="font-medium text-gray-800 truncate">{r.comercio || r.descripcion}</div>
+                            {r.comercio && <div className="text-gray-400 truncate">{r.descripcion}</div>}
+                          </td>
+
+                          {/* Celda proveedor */}
+                          <td className="py-2 px-2 min-w-[160px]">
+                            {newProvForm?.idx === i ? (
+                              /* Mini-form crear proveedor */
+                              <div className="flex flex-col gap-1 bg-amber-50 rounded p-1.5 border border-amber-200">
+                                <input
+                                  className="input text-xs py-0.5"
+                                  value={newProvForm.nombre}
+                                  onChange={e => setNewProvForm(f => f ? { ...f, nombre: e.target.value } : f)}
+                                  placeholder="Nombre del proveedor"
+                                  autoFocus
+                                />
+                                <select
+                                  className="select text-xs py-0.5"
+                                  value={newProvForm.tipo}
+                                  onChange={e => setNewProvForm(f => f ? { ...f, tipo: e.target.value } : f)}
+                                >
+                                  <option value="comercio">Comercio general</option>
+                                  <option value="restaurant">Restaurant / Comida</option>
+                                  <option value="supermercado">Supermercado</option>
+                                  <option value="farmacia">Farmacia</option>
+                                  <option value="combustible">Combustible</option>
+                                  <option value="transporte">Transporte</option>
+                                  <option value="servicio">Servicio / Suscripción</option>
+                                  <option value="entretenimiento">Entretenimiento</option>
+                                  <option value="banco">Banco / Finanzas</option>
+                                </select>
+                                <div className="flex gap-1">
+                                  <button onClick={handleCreateProvider} disabled={savingProv || !newProvForm.nombre.trim()}
+                                    className="btn btn-xs flex-1 bg-amber-500 text-white text-xs py-0.5">
+                                    {savingProv ? '...' : 'Crear'}
+                                  </button>
+                                  <button onClick={() => setNewProvForm(null)} className="btn btn-xs text-xs py-0.5">✕</button>
+                                </div>
+                              </div>
+                            ) : matchingProviders ? (
+                              <div className="h-4 w-24 bg-gray-100 rounded animate-pulse" />
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                {/* Badge de proveedor */}
+                                <select
+                                  className="select text-xs py-0.5 flex-1 min-w-0"
+                                  value={supplierId ?? ''}
+                                  onChange={e => {
+                                    const val = e.target.value
+                                    if (val === '__new__') {
+                                      setNewProvForm({ idx: i, nombre: supplierName ?? key, tipo: match?.tipo_sugerido ?? 'comercio' })
+                                    } else {
+                                      const sel = suppliers.find((s: any) => s.id === val)
+                                      setRowOverrides(prev => ({ ...prev, [i]: { ...prev[i], supplier_id: val || null, nombre_proveedor: sel?.name ?? null } }))
+                                    }
+                                  }}
+                                >
+                                  <option value="">Sin proveedor</option>
+                                  {suppliers.map((s: any) => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                  ))}
+                                  <option value="__new__">+ Crear &quot;{supplierName ?? key}&quot;</option>
+                                </select>
+                                {/* Indicador visual */}
+                                {isMatched && <span className="text-green-500 flex-shrink-0">✓</span>}
+                                {isNew && <span className="text-amber-500 flex-shrink-0">★</span>}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Centro de costo */}
+                          <td className="py-2 px-2 min-w-[140px]">
+                            <select
+                              className="select text-xs py-0.5 w-full"
+                              value={override.cost_center_id ?? ''}
+                              onChange={e => setRowOverrides(prev => ({ ...prev, [i]: { ...prev[i], cost_center_id: e.target.value || null } }))}
+                            >
+                              <option value="">Clasificar con IA</option>
+                              {costCenters.map((c: any) => (
+                                <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+                              ))}
+                            </select>
+                          </td>
+
+                          <td className="py-2 px-2 text-right whitespace-nowrap">
+                            {r.cargo > 0
+                              ? <span className="text-red-600 font-medium">-${fmt(r.cargo)}</span>
+                              : <span className="text-green-600 font-medium">+${fmt(r.abono)}</span>
+                            }
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
-              <button onClick={handleImport} disabled={importing} className="btn-primary w-full">
-                {importing ? '⚙️ Importando y clasificando con IA...' : `✓ Importar ${parsedRows.length} movimientos`}
+
+              {/* Leyenda */}
+              {!matchingProviders && Object.keys(matchMap).length > 0 && (
+                <div className="flex gap-4 text-xs text-gray-400 mb-3">
+                  <span><span className="text-green-500">✓</span> Proveedor encontrado</span>
+                  <span><span className="text-amber-500">★</span> Proveedor nuevo sugerido</span>
+                  <span>Los centros de costo vacíos se clasificarán automáticamente con IA</span>
+                </div>
+              )}
+
+              <button onClick={handleImport} disabled={importing || matchingProviders} className="btn-primary w-full">
+                {importing ? '⚙️ Importando...' : `✓ Importar ${parsedRows.length} movimientos`}
               </button>
             </div>
           )}
