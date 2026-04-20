@@ -10,7 +10,7 @@ export default async function ComprasPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const [costCenters, recentPurchases, suppliers] = await Promise.all([
+  const [costCenters, recentPurchases, suppliers, allPurchases] = await Promise.all([
     supabase.from('cost_centers').select('id, name, icon, color, type').eq('user_id', user.id).eq('is_active', true).order('sort_order'),
     supabase.from('purchase_orders')
       .select(`*, suppliers(name), cost_centers(name,icon), purchase_items(*, products(name,unit))`)
@@ -18,7 +18,13 @@ export default async function ComprasPage() {
       .eq('status', 'confirmed')
       .order('purchased_at', { ascending: false })
       .limit(20),
-    supabase.from('suppliers').select('id, name').eq('is_active', true),
+    supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
+    // Todas las compras para el módulo de proveedores (historial completo)
+    supabase.from('purchase_orders')
+      .select(`id, purchased_at, total_clp, notes, supplier_id, purchase_items(qty, unit_price_clp, products(name, unit))`)
+      .eq('user_id', user.id)
+      .eq('status', 'confirmed')
+      .order('purchased_at', { ascending: false }),
   ])
 
   return (
@@ -33,6 +39,7 @@ export default async function ComprasPage() {
         costCenters={costCenters.data ?? []}
         recentPurchases={recentPurchases.data ?? []}
         suppliers={suppliers.data ?? []}
+        allPurchases={allPurchases.data ?? []}
       />
     </div>
   )
