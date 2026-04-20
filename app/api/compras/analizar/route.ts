@@ -43,7 +43,13 @@ Responde ÚNICAMENTE con un JSON plano (sin markdown) con esta estructura:
 
     const result = await model.generateContent([prompt, imagePart])
     const text = result.response.text().replace(/```json|```/g, '').trim()
-    return NextResponse.json(JSON.parse(text))
+    let parsed
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      return NextResponse.json({ error: 'La IA no devolvió JSON válido', raw: text }, { status: 422 })
+    }
+    return NextResponse.json(parsed)
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

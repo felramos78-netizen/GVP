@@ -129,7 +129,6 @@ Si necesitas ejecutar una acción, agrega al FINAL de tu respuesta:
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
-      generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
     })
 
     const result = await model.generateContent(`${systemPrompt}\n\nUsuario: ${message}`)
