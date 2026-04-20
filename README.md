@@ -240,8 +240,8 @@ npm run db:types
 ## Próximas iteraciones sugeridas
 
 - [ ] Integración con Fintoc para conectar cuentas bancarias a centros de costo
-- [ ] Notificaciones push cuando stock llega al mínimo
-- [ ] Exportación del historial a Excel
-- [ ] Modo offline con Service Worker
+- [x] Notificaciones push cuando stock llega al mínimo *(browser Notification API, se activa al visitar Stock)*
+- [x] Exportación del historial a Excel *(botón "Exportar Excel" en Stock → Inventario y Banco → Movimientos)*
+- [x] Modo offline con Service Worker *(PWA configurado con @ducanh2912/next-pwa)*
 - [ ] App móvil con Capacitor (usa el mismo codebase Next.js)
 - [ ] Ajuste automático de macros según día de entrenamiento (con IA)

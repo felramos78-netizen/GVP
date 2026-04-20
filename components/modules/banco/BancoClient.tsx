@@ -149,6 +149,21 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
   const totalIngresos = txList.filter((t: any) => t.amount > 0).reduce((a: number, t: any) => a + t.amount, 0)
   const sinClasificar = txList.filter((t: any) => !t.cost_center_id && t.amount < 0).length
 
+  const exportToExcel = () => {
+    const data = filtered.map((tx: any) => ({
+      'Fecha': tx.transaction_date,
+      'Descripción': tx.merchant_name ?? tx.description,
+      'Monto': tx.amount,
+      'Tipo': tx.amount < 0 ? 'Gasto' : 'Ingreso',
+      'Centro de costo': tx.cost_centers ? `${tx.cost_centers.icon ?? ''} ${tx.cost_centers.name}`.trim() : '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(data)
+    ws['!cols'] = [{ wch: 12 }, { wch: 40 }, { wch: 12 }, { wch: 10 }, { wch: 25 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Movimientos')
+    XLSX.writeFile(wb, `movimientos_${new Date().toISOString().split('T')[0]}.xlsx`)
+  }
+
   return (
     <div className="flex flex-col gap-4">
 
@@ -271,19 +286,26 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
       {/* MOVIMIENTOS */}
       {tab === 'movimientos' && txList.length > 0 && importStep === 'idle' && (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2 items-center">
-            <input className="input max-w-xs text-sm" placeholder="Buscar movimiento..."
-              value={filter.search} onChange={e => setFilter(f => ({ ...f, search: e.target.value }))} />
-            <div className="flex gap-1">
-              {(['todos','gastos','ingresos'] as const).map(t => (
-                <button key={t} onClick={() => setFilter(f => ({ ...f, type: t }))}
-                  className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-all',
-                    filter.type === t ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  )}>
-                  {t.charAt(0).toUpperCase() + t.slice(1)}
-                </button>
-              ))}
+          <div className="flex flex-wrap gap-2 items-center justify-between">
+            <div className="flex flex-wrap gap-2 items-center">
+              <input className="input max-w-xs text-sm" placeholder="Buscar movimiento..."
+                value={filter.search} onChange={e => setFilter(f => ({ ...f, search: e.target.value }))} />
+              <div className="flex gap-1">
+                {(['todos','gastos','ingresos'] as const).map(t => (
+                  <button key={t} onClick={() => setFilter(f => ({ ...f, type: t }))}
+                    className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition-all',
+                      filter.type === t ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    )}>
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
+              </div>
             </div>
+            {filtered.length > 0 && (
+              <button onClick={exportToExcel} className="btn btn-sm text-xs">
+                Exportar Excel
+              </button>
+            )}
           </div>
           <div className="card divide-y divide-gray-100">
             {filtered.length === 0

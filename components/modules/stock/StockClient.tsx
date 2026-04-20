@@ -1,14 +1,17 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import * as XLSX from 'xlsx'
 import { formatCLP, formatQty, formatDateShort, getStockStatus, stockStatusClasses, cn } from '@/lib/utils/formatters'
 import { useConfirmPurchase } from '@/hooks/useStock'
+import { useStockNotifications } from '@/hooks/useStockNotifications'
 import { createClient } from '@/lib/supabase/client'
 
 export function StockClient({ stock, alerts, recentPurchases, costCenters, suppliers }: any) {
   const router = useRouter()
   const supabase = createClient()
   const { mutate: confirmPurchase, isPending } = useConfirmPurchase()
+  useStockNotifications(alerts)
   const [activeTab, setActiveTab] = useState<'inventory'|'purchase'|'history'>('inventory')
   const [search, setSearch] = useState('')
   const [editingStock, setEditingStock] = useState<any>(null)
@@ -54,6 +57,27 @@ export function StockClient({ stock, alerts, recentPurchases, costCenters, suppl
     { key: 'purchase',  label: 'Compra pendiente' },
     { key: 'history',   label: 'Historial' },
   ] as const
+
+  const exportInventario = () => {
+    const data = stock.map((item: any) => {
+      const status = getStockStatus(item.current_qty, item.min_qty)
+      return {
+        'Producto': item.products?.name ?? '',
+        'Categoría': item.products?.category ?? '',
+        'Marca': item.products?.brand ?? '',
+        'Cantidad actual': item.current_qty,
+        'Cantidad mínima': item.min_qty,
+        'Unidad': item.unit ?? item.products?.unit ?? '',
+        'Estado': status === 'ok' ? 'OK' : status === 'low' ? 'Bajo' : 'Crítico',
+        'Última compra': item.last_purchase_at ?? '',
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(data)
+    ws['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 15 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 14 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
+    XLSX.writeFile(wb, `inventario_${new Date().toISOString().split('T')[0]}.xlsx`)
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,8 +125,15 @@ export function StockClient({ stock, alerts, recentPurchases, costCenters, suppl
       {/* INVENTARIO */}
       {activeTab === 'inventory' && (
         <div className="flex flex-col gap-3">
-          <input className="input max-w-sm" placeholder="Buscar producto o categoría..."
-            value={search} onChange={e => setSearch(e.target.value)} />
+          <div className="flex gap-2 items-center">
+            <input className="input max-w-sm flex-1" placeholder="Buscar producto o categoría..."
+              value={search} onChange={e => setSearch(e.target.value)} />
+            {stock.length > 0 && (
+              <button onClick={exportInventario} className="btn btn-sm text-xs flex-shrink-0">
+                Exportar Excel
+              </button>
+            )}
+          </div>
           {filtered.length === 0 ? (
             <div className="card text-center py-10">
               <p className="text-sm text-gray-400">Sin productos en el inventario aún.</p>
