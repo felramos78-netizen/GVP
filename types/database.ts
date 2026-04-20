@@ -63,14 +63,28 @@ export type Database = {
         Row: {
           id: string
           name: string
-          type: 'supermercado' | 'feria' | 'online' | null
+          type: 'supermercado' | 'feria' | 'online' | 'servicio' | 'banco' | 'combustible' | 'farmacia' | 'restaurant' | 'transporte' | 'entretenimiento' | 'comercio' | null
           base_url: string | null
           search_url_pattern: string | null
           logo_url: string | null
           is_active: boolean
+          user_id: string | null
+          category: string | null
+          razones_sociales: string[]
         }
         Insert: Omit<Database['public']['Tables']['suppliers']['Row'], 'id'>
         Update: Partial<Database['public']['Tables']['suppliers']['Insert']>
+      }
+      provider_aliases: {
+        Row: {
+          id: string
+          supplier_id: string
+          alias: string
+          user_id: string | null
+          created_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['provider_aliases']['Row'], 'id' | 'created_at'>
+        Update: Partial<Database['public']['Tables']['provider_aliases']['Insert']>
       }
       products: {
         Row: {
@@ -255,6 +269,60 @@ export type Database = {
         Insert: Omit<Database['public']['Tables']['ai_usage']['Row'], 'id'>
         Update: Partial<Database['public']['Tables']['ai_usage']['Insert']>
       }
+      bank_connections: {
+        Row: {
+          id: string
+          user_id: string
+          fintoc_link_id: string
+          institution: string
+          holder_type: string | null
+          status: 'active' | 'inactive' | 'error'
+          last_sync_at: string | null
+          created_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['bank_connections']['Row'], 'id' | 'created_at'>
+        Update: Partial<Database['public']['Tables']['bank_connections']['Insert']>
+      }
+      bank_accounts: {
+        Row: {
+          id: string
+          connection_id: string
+          user_id: string
+          fintoc_account_id: string
+          name: string
+          type: string | null
+          currency: string
+          balance_available: number
+          balance_current: number
+          refreshed_at: string | null
+        }
+        Insert: Omit<Database['public']['Tables']['bank_accounts']['Row'], 'id'>
+        Update: Partial<Database['public']['Tables']['bank_accounts']['Insert']>
+      }
+      bank_transactions: {
+        Row: {
+          id: string
+          account_id: string
+          user_id: string
+          fintoc_transaction_id: string
+          amount: number
+          currency: string
+          description: string | null
+          transaction_date: string
+          merchant_name: string | null
+          category_gdv: string | null
+          cost_center_id: string | null
+          supplier_id: string | null
+          document_type: 'cartola' | 'tarjeta_credito' | null
+          is_expense: boolean
+          ai_classified: boolean
+          manually_reviewed: boolean
+          raw_data: Json | null
+          created_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['bank_transactions']['Row'], 'id' | 'created_at'>
+        Update: Partial<Database['public']['Tables']['bank_transactions']['Insert']>
+      }
     }
   }
 }
@@ -283,6 +351,13 @@ export type PurchaseItem   = Tables<'purchase_items'>
 export type Recipe         = Tables<'recipes'>
 export type RecipeIngredient = Tables<'recipe_ingredients'>
 export type MealPlan       = Tables<'meal_plan'>
-export type CleaningTask   = Tables<'cleaning_tasks'>
-export type TaskLog        = Tables<'task_log'>
-export type AiUsage        = Tables<'ai_usage'>
+export type CleaningTask      = Tables<'cleaning_tasks'>
+export type TaskLog           = Tables<'task_log'>
+export type AiUsage           = Tables<'ai_usage'>
+export type BankConnection    = Tables<'bank_connections'>
+export type BankAccount       = Tables<'bank_accounts'>
+export type BankTransaction   = Tables<'bank_transactions'>
+export type ProviderAlias     = Tables<'provider_aliases'>
+
+// Supplier type para uso en banco (más genérico)
+export type SupplierType = Database['public']['Tables']['suppliers']['Row']['type']
