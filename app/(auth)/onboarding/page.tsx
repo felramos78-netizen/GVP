@@ -1,7 +1,8 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+
+export const dynamic = 'force-dynamic'
 
 // ── Tipos ──────────────────────────────────────────────────────
 type Phase = 'chat' | 'preview' | 'saving' | 'done'
@@ -102,7 +103,6 @@ const QUESTIONS: ChatMessage[] = [
 // ── Componente principal ───────────────────────────────────────
 export default function OnboardingPage() {
   const router = useRouter()
-  const supabase = createClient()
 
   const [phase, setPhase] = useState<Phase>('chat')
   const [messages, setMessages] = useState<ChatMessage[]>([QUESTIONS[0]])

@@ -1,11 +1,8 @@
 'use client'
-/**
- * app/(auth)/login/page.tsx
- * Página de login. Usa magic link de Supabase (sin contraseña).
- * Gratuito, sin dependencias externas de auth.
- */
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+
+export const dynamic = 'force-dynamic'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -13,13 +10,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const supabase = createClient()
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError(null)
 
+    const supabase = createClient()
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
