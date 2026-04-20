@@ -147,7 +147,11 @@ sistema-vida/
 | Recetas | `/recetas` | Recetario con ingredientes cruzados contra stock |
 | Cotización | `/cotizacion` | Comparativa de precios entre proveedores |
 | Finanzas | `/finanzas` | Centros de costo y presupuesto mensual |
+| Banco | `/banco` | Conexión bancaria Fintoc, clasificación de gastos |
 | Aseo | `/aseo` | Actividades de higiene con registro histórico |
+| Agente IA | Widget global | Asistente conversacional con acceso al sistema |
+
+Para descripción detallada y diagramas de flujo de cada módulo, ver **[FEATURES.md](./FEATURES.md)**.
 
 ---
 
