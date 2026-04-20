@@ -1,7 +1,8 @@
 'use client'
 /**
- * BancoClient — importación por archivo Excel/CSV como método principal.
- * Fintoc queda como opción alternativa (requiere plan pagado).
+ * BancoClient — importación por archivo PDF, Excel o CSV.
+ * PDF: cartola o estado de cuenta tarjeta de crédito (extracción via Gemini).
+ * Excel/CSV: exportado desde la web del banco.
  */
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -11,13 +12,16 @@ import * as XLSX from 'xlsx'
 type Tab = 'movimientos' | 'cuentas' | 'resumen'
 type ImportStep = 'idle' | 'processing' | 'preview' | 'done'
 
-export function BancoClient({ connections, transactions, costCenters, fintocPublicKey }: any) {
+export function BancoClient({ connections, transactions, costCenters, suppliers = [], fintocPublicKey }: any) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('movimientos')
   const [txList, setTxList] = useState(transactions)
   const [importStep, setImportStep] = useState<ImportStep>('idle')
   const [parsedRows, setParsedRows] = useState<any[]>([])
+  const [documentType, setDocumentType] = useState<'cartola' | 'tarjeta_credito'>('cartola')
+  const [pdfInstitution, setPdfInstitution] = useState<string>('Banco de Chile')
+  const [processingMsg, setProcessingMsg] = useState('Leyendo archivo...')
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
@@ -30,9 +34,48 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
   const totalBalance = allAccounts.reduce((a: number, acc: any) => a + (acc.balance_available ?? 0), 0)
   const fmt = (n: number) => Math.abs(Math.round(n)).toLocaleString('es-CL')
 
+  // Parsear PDF usando Gemini via /api/banco/pdf
+  const parsePdf = useCallback(async (file: File) => {
+    setError('')
+    setProcessingMsg('Extrayendo movimientos del PDF con IA...')
+    setImportStep('processing')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/banco/pdf', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Error al procesar el PDF')
+
+      const rows = (data.transactions ?? []).map((tx: any) => ({
+        fecha: tx.fecha,
+        descripcion: tx.descripcion,
+        comercio: tx.comercio ?? null,
+        cargo: tx.cargo ?? 0,
+        abono: tx.abono ?? 0,
+        saldo: tx.saldo ?? null,
+      }))
+
+      if (rows.length === 0) throw new Error('No se encontraron movimientos en el PDF.')
+
+      setDocumentType(data.document_type ?? 'cartola')
+      setPdfInstitution(data.institution ?? 'Banco de Chile')
+      setParsedRows(rows)
+      setImportStep('preview')
+    } catch (err) {
+      setError((err as Error).message)
+      setImportStep('idle')
+    }
+  }, [])
+
   // Parsear archivo Excel o CSV del banco
   const parseFile = useCallback(async (file: File) => {
+    // Despachar según tipo de archivo
+    if (file.name.toLowerCase().endsWith('.pdf')) {
+      return parsePdf(file)
+    }
+
     setError('')
+    setProcessingMsg('Leyendo archivo...')
     setImportStep('processing')
     try {
       const buffer = await file.arrayBuffer()
@@ -100,6 +143,7 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
 
       if (rows.length === 0) throw new Error('No se encontraron movimientos. Verifica que el archivo sea el correcto.')
 
+      setDocumentType('cartola')
       setParsedRows(rows)
       setImportStep('preview')
     } catch (err) {
@@ -119,7 +163,7 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
     try {
       const res = await fetch('/api/banco', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: parsedRows, institution: 'Banco de Chile' }),
+        body: JSON.stringify({ rows: parsedRows, institution: pdfInstitution, document_type: documentType }),
       })
       const data = await res.json()
       if (data.ok) {
@@ -186,15 +230,24 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
           {importStep === 'processing' && (
             <div className="text-center py-8">
               <div className="text-3xl mb-3 animate-spin">⚙️</div>
-              <div className="text-sm text-gray-600">Leyendo archivo...</div>
+              <div className="text-sm text-gray-600">{processingMsg}</div>
             </div>
           )}
           {importStep === 'preview' && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div>
-                  <div className="text-sm font-semibold text-gray-900">{parsedRows.length} movimientos detectados</div>
-                  <div className="text-xs text-gray-400">Revisa antes de importar — la IA los clasificará automáticamente</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-gray-900">{parsedRows.length} movimientos detectados</div>
+                    <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium',
+                      documentType === 'tarjeta_credito'
+                        ? 'bg-violet-100 text-violet-700'
+                        : 'bg-blue-100 text-blue-700'
+                    )}>
+                      {documentType === 'tarjeta_credito' ? 'Tarjeta de crédito' : 'Cartola'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-400">Revisa antes de importar — la IA clasificará centros de costo y proveedores</div>
                 </div>
                 <button onClick={() => setImportStep('idle')} className="btn btn-sm">Cancelar</button>
               </div>
@@ -248,16 +301,20 @@ export function BancoClient({ connections, transactions, costCenters, fintocPubl
             className={cn('border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all',
               dragging ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-gray-400 hover:bg-gray-50'
             )}>
-            <div className="text-4xl mb-3">📊</div>
-            <div className="text-sm font-semibold text-gray-700 mb-2">Arrastra o sube tu cartola bancaria</div>
-            <div className="text-xs text-gray-400 mb-4">Excel (.xlsx) o CSV exportado desde la web del banco</div>
-            <div className="bg-blue-50 rounded-lg p-3 text-left text-xs text-blue-700">
-              <div className="font-semibold mb-1">¿Cómo exportar desde Banco de Chile?</div>
-              <div>1. Entra a Mi Banco en línea → Cuentas</div>
-              <div>2. Click en tu cuenta → Movimientos</div>
-              <div>3. Selecciona el período → Exportar Excel</div>
+            <div className="text-4xl mb-3">📄</div>
+            <div className="text-sm font-semibold text-gray-700 mb-2">Arrastra o sube tu documento bancario</div>
+            <div className="text-xs text-gray-400 mb-4">PDF · Excel (.xlsx) · CSV — cartola o estado de cuenta tarjeta</div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="bg-blue-50 rounded-lg p-2.5 text-left text-xs text-blue-700">
+                <div className="font-semibold mb-1">Cartola (PDF o Excel)</div>
+                <div>Mi Banco en línea → Cuentas → Movimientos → Exportar</div>
+              </div>
+              <div className="bg-violet-50 rounded-lg p-2.5 text-left text-xs text-violet-700">
+                <div className="font-semibold mb-1">Tarjeta de Crédito (PDF)</div>
+                <div>Mi Banco en línea → Tarjetas → Estado de cuenta → Descargar PDF</div>
+              </div>
             </div>
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+            <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.csv" className="hidden"
               onChange={e => e.target.files?.[0] && parseFile(e.target.files[0])} />
           </div>
           <div className="mt-3 text-center">
