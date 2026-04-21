@@ -9,6 +9,26 @@ import { createClient } from '@/lib/supabase/server'
 import { genAI } from '@/lib/gemini/client'
 import { NextRequest, NextResponse } from 'next/server'
 
+// GET — obtener todas las transacciones del usuario (para refresh post-importación)
+export async function GET() {
+  try {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+    const { data: transactions } = await supabase
+      .from('bank_transactions')
+      .select('*, bank_accounts(name, type), cost_centers(name, icon, color), suppliers(id, name, type, category)')
+      .eq('user_id', user.id)
+      .order('transaction_date', { ascending: false })
+      .limit(500)
+
+    return NextResponse.json({ transactions: transactions ?? [] })
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = createClient()

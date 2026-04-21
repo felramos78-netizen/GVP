@@ -192,44 +192,49 @@ export async function POST(request: NextRequest) {
           .map((s: any) => `${s.id}|${s.name}|${s.type}`)
           .join('\n')
 
-        const prompt = `Eres un experto en comercios chilenos. Tu tarea es identificar el NOMBRE POPULAR (nombre de pila) de cada establecimiento a partir de descripciones de transacciones bancarias.
+        const prompt = `Eres un experto en comercios chilenos. Tu tarea es identificar el NOMBRE POPULAR (marca conocida) de cada establecimiento a partir de descripciones de transacciones bancarias.
 
-REGLA PRINCIPAL: NO copies ni limpies el texto de la descripción. Identifica la MARCA REAL del comercio.
-- Si es una cadena reconocida → usa el nombre oficial de la cadena
-- Si no puedes identificar la marca con certeza → busca en la web antes de responder
-- Solo si definitivamente no hay información disponible → usa el texto más limpio posible
+REGLA PRINCIPAL: NO copies ni limpies el texto de la descripción. Identifica la MARCA REAL del comercio usando tu conocimiento de Chile.
 
-Ejemplos de cómo mapear descripciones chilenas a nombres reales:
-- "EXPRESS PORTUGAL SANTIAGO" → "Líder" (es Lider Express, sucursal Portugal)
+Patrones comunes en extractos bancarios chilenos:
+- "EXPRESS PORTUGAL SANTIAGO" → "Líder" (Lider Express, sucursal Portugal)
 - "HIP LIDER PPE DE GALES SANTIAGO" → "Líder"
 - "LIDER EXPRESS XXXX" → "Líder"
 - "UNIMARC XXX SANTIAGO" → "Unimarc"
 - "JUMBO XXX" → "Jumbo"
 - "SUPER10 XXX" → "Super 10"
+- "TOTTUS VICUNA MACKENNA" → "Tottus"
 - "DIDI DIDI LAS CONDES" → "DiDi"
-- "SUMUP * DELIMARKET SANTIAGO" → "Delimarket" (nombre después de SUMUP *)
+- "SUMUP * DELIMARKET SANTIAGO" → "Delimarket" (nombre DESPUÉS de SUMUP *)
 - "SUMUP * AREPAS DONA M SANTIAGO" → "Arepas Doña M" (nombre después de SUMUP *)
 - "MERCADOPAGO *CHALITO Las Condes" → "Chalito" (comercio detrás de MercadoPago)
 - "MP *MERCADO LIBRE TASA INT. 0,00%" → "Mercado Libre"
 - "CRUZ VERDE CV 1034 SANTIAGO" → "Cruz Verde"
-- "INVERSION TOMORROW L SANTIAGO" → "Tomorrow" (fintech chilena de inversiones)
+- "INVERSION TOMORROW L SANTIAGO" → "Tomorrow" (fintech de inversiones)
 - "SPID LOS TRIGALES O496 SANTIAGO" → "Spid" (supermercado)
-- "BLACK WHITE PROV SANTIAGO" → "Black & White" (si lo identificas) o el nombre más limpio
-- "INTERESES LINEA DE CREDITO" → el banco correspondiente
-- "EDGAR JOEL SANTA CRU SANTIAGO" → nombre de persona, probablemente servicio independiente
+- "INTERESES LINEA DE CREDITO" → null (cargo bancario, no es comercio)
+- "EDGAR JOEL SANTA CRU SANTIAGO" → "Edgar Joel" (persona, servicio independiente)
+- "CABIFY" → "Cabify"
+- "UBER" → "Uber"
+- "NETFLIX.COM" → "Netflix"
+- "SPOTIFY" → "Spotify"
+- "ESTACION COPEC" → "Copec"
+- "SHELL SERVICIO" → "Shell"
+- "FARMACIA AHUMADA" → "Ahumada"
+- "SALCOBRAND" → "Salcobrand"
 
-Proveedores ya existentes en el sistema (id|nombre|tipo) — si la descripción corresponde a uno de estos, devuelve su id:
+Proveedores ya existentes en el sistema (id|nombre|tipo) — si la descripción corresponde a uno de estos, devuelve su id exacto:
 ${suppliersDesc}
 
 Descripciones bancarias a identificar:
 ${unmatched.map((d, i) => `${i}. "${d}"`).join('\n')}
 
-Responde SOLO con JSON válido sin markdown:
+Responde SOLO con JSON válido (sin markdown, sin explicaciones):
 {
   "matches": [
     {
       "index": 0,
-      "supplier_id": "uuid-si-existe-en-lista-o-null",
+      "supplier_id": "uuid-exacto-si-existe-en-la-lista-o-null",
       "nombre_sugerido": "Nombre popular real del comercio",
       "tipo_sugerido": "comercio|servicio|banco|combustible|farmacia|restaurant|supermercado|transporte|entretenimiento",
       "confianza": 0.9
@@ -238,36 +243,42 @@ Responde SOLO con JSON válido sin markdown:
 }`
 
         try {
-          // Usar modelo con Google Search para identificar marcas desconocidas
           const model = genAI.getGenerativeModel({
             model: 'gemini-2.5-flash',
-            tools: [{ googleSearch: {} }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 4096,
+              responseMimeType: 'application/json',
+            },
           })
           const result = await model.generateContent(prompt)
-          const text = result.response.text().replace(/```json|```/g, '').trim()
-          const json = JSON.parse(text.match(/\{[\s\S]*\}/)![0])
+          const json = JSON.parse(result.response.text())
 
           for (const m of (json.matches ?? [])) {
             const desc = unmatched[m.index]
-            if (desc) {
-              directMatches.set(desc, m.supplier_id
-                ? { supplier_id: m.supplier_id, name: m.nombre_sugerido, confidence: m.confianza ?? 0.7 }
-                : null
-              )
-              // Guardar nombre sugerido para nuevos
-              if (!m.supplier_id) {
-                directMatches.set(desc, {
-                  supplier_id: '__new__',
-                  name: m.nombre_sugerido ?? desc,
-                  confidence: 0,
-                  // @ts-ignore
-                  tipo_sugerido: m.tipo_sugerido ?? 'comercio',
-                })
-              }
+            if (!desc) continue
+
+            if (m.supplier_id) {
+              // Validar que el supplier_id existe en nuestra lista
+              const supplierInDB = (suppliers ?? []).find((s: any) => s.id === m.supplier_id)
+              directMatches.set(desc, {
+                supplier_id: m.supplier_id,
+                name: supplierInDB?.name ?? m.nombre_sugerido,
+                confidence: m.confianza ?? 0.7,
+              })
+            } else {
+              directMatches.set(desc, {
+                supplier_id: '__new__',
+                name: m.nombre_sugerido ?? desc,
+                confidence: m.confianza ?? 0.5,
+                // @ts-ignore
+                tipo_sugerido: m.tipo_sugerido ?? 'comercio',
+              })
             }
           }
-        } catch { /* si Gemini falla, dejamos sin match */ }
+        } catch (e) {
+          console.error('[proveedores] Gemini error:', e)
+        }
       }
 
       // 4. Construir respuesta

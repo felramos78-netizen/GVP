@@ -109,6 +109,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
   const [importResult, setImportResult] = useState<any>(null)
   const [editingTx, setEditingTx] = useState<string|null>(null)
   const [filter, setFilter] = useState({ search: '', type: 'todos' })
+  const [previewSearch, setPreviewSearch] = useState('')
 
   // ── Cruce de proveedores ──────────────────────────────────────────────────
   // matchMap: clave = (comercio || descripcion) → { supplier_id, nombre_sugerido, tipo_sugerido, es_nuevo }
@@ -525,6 +526,32 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                 </div>
               )}
 
+              {/* Barra de búsqueda / filtro del preview */}
+              <div className="flex items-center gap-2 mb-2">
+                <div className="relative flex-1 max-w-xs">
+                  <input
+                    className="input text-xs w-full pr-6"
+                    placeholder="Filtrar por descripción o proveedor..."
+                    value={previewSearch}
+                    onChange={e => setPreviewSearch(e.target.value)}
+                  />
+                  {previewSearch && (
+                    <button
+                      onClick={() => setPreviewSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs leading-none"
+                    >✕</button>
+                  )}
+                </div>
+                {previewSearch && (
+                  <span className="text-xs text-gray-400 flex-shrink-0">
+                    {parsedRows.filter(r => {
+                      const h = `${r.descripcion ?? ''} ${r.comercio ?? ''}`.toLowerCase()
+                      return h.includes(previewSearch.toLowerCase())
+                    }).length} de {parsedRows.length}
+                  </span>
+                )}
+              </div>
+
               <div className="overflow-x-auto max-h-[420px] overflow-y-auto mb-4 border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-white border-b border-gray-200 z-10">
@@ -537,7 +564,15 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                     </tr>
                   </thead>
                   <tbody>
-                    {parsedRows.map((r, i) => {
+                    {parsedRows
+                      .map((r, i) => ({ ...r, _idx: i }))
+                      .filter(r => {
+                        if (!previewSearch) return true
+                        const h = `${r.descripcion ?? ''} ${r.comercio ?? ''}`.toLowerCase()
+                        return h.includes(previewSearch.toLowerCase())
+                      })
+                      .map((r) => {
+                      const i = r._idx
                       const key = r.comercio || r.descripcion
                       const match = matchMap[key]
                       const override = rowOverrides[i] ?? {}
