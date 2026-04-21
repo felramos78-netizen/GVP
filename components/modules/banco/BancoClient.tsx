@@ -6,7 +6,6 @@
  * Excel/CSV genérico: exportado desde la web del banco.
  */
 import { useState, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils/formatters'
 import * as XLSX from 'xlsx'
 
@@ -94,7 +93,6 @@ function parseMovFact(raw: any[][]): any[] {
 }
 
 export function BancoClient({ connections, transactions, costCenters, suppliers = [], fintocPublicKey }: any) {
-  const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('movimientos')
   const [txList, setTxList] = useState(transactions)
@@ -299,6 +297,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
     if (file) parseFile(file)
   }
 
+  const refreshTransactions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/banco')
+      if (res.ok) {
+        const { transactions: fresh } = await res.json()
+        setTxList(fresh ?? [])
+      }
+    } catch { /* silencioso — la lista se actualizará en el próximo refresh */ }
+  }, [])
+
   const handleImport = async () => {
     setImporting(true); setError('')
     try {
@@ -356,7 +364,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       if (data.ok) {
         setImportResult({ ...data, auto_created: createdMap.size })
         setImportStep('done')
-        router.refresh()
+        await refreshTransactions()
       } else {
         setError(data.error ?? 'Error al importar')
       }
@@ -807,6 +815,28 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
               ¿Prefieres conectar directamente con Fintoc? (requiere plan pagado)
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ZONA COMPACTA — importar otra cartola cuando ya hay transacciones */}
+      {importStep === 'idle' && tab === 'movimientos' && txList.length > 0 && (
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => {
+            e.preventDefault(); setDragging(false)
+            const file = e.dataTransfer.files[0]
+            if (file) { setPreviewSearch(''); parseFile(file) }
+          }}
+          onClick={() => fileRef.current?.click()}
+          className={cn(
+            'border border-dashed rounded-lg py-2.5 px-4 text-center text-xs cursor-pointer transition-all',
+            dragging
+              ? 'border-blue-300 bg-blue-50 text-blue-500'
+              : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-500'
+          )}
+        >
+          + Arrastra o haz clic para importar otra cartola o estado de cuenta
         </div>
       )}
 
