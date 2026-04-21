@@ -182,12 +182,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
 
   // Parsear archivo Excel o CSV del banco
   const parseFile = useCallback(async (file: File) => {
+    // Limpiar estado previo antes de parsear cualquier archivo
+    setPreviewSearch('')
+    setNewProvForm(null)
+    setError('')
+
     // Despachar según tipo de archivo
     if (file.name.toLowerCase().endsWith('.pdf')) {
       return parsePdf(file)
     }
 
-    setError('')
     setProcessingMsg('Leyendo archivo...')
     setImportStep('processing')
     try {
