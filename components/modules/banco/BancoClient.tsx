@@ -301,26 +301,59 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
   const handleImport = async () => {
     setImporting(true); setError('')
     try {
-      // Fusionar matches de proveedores + overrides manuales en cada fila
+      // ── 1. Recopilar proveedores nuevos auto-generados a crear ────────────
+      // Mapa: nombre_limpio → { tipo, aliases (descripciones originales) }
+      const toCreate = new Map<string, { tipo: string; aliases: Set<string> }>()
+
+      parsedRows.forEach((row, i) => {
+        const key = row.comercio || row.descripcion
+        const match = matchMap[key]
+        const override = rowOverrides[i] ?? {}
+        const isAutoNew = match?.es_nuevo && !override.supplier_id && !override._skip_new
+        const nombre = (override.nombre_nuevo ?? match?.nombre_sugerido ?? '').trim()
+        if (isAutoNew && nombre) {
+          if (!toCreate.has(nombre)) {
+            toCreate.set(nombre, { tipo: match?.tipo_sugerido ?? 'comercio', aliases: new Set() })
+          }
+          toCreate.get(nombre)!.aliases.add(key)
+        }
+      })
+
+      // ── 2. Crear proveedores en lote ──────────────────────────────────────
+      const createdMap = new Map<string, string>() // nombre → supplier_id
+      for (const [nombre, { tipo, aliases }] of toCreate) {
+        const res = await fetch('/api/banco/proveedores', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'create', nombre, tipo, aliases: [...aliases] }),
+        })
+        const data = await res.json()
+        if (data.supplier?.id) createdMap.set(nombre, data.supplier.id)
+      }
+
+      // ── 3. Fusionar supplier_ids en cada fila ─────────────────────────────
       const enrichedRows = parsedRows.map((row, i) => {
         const key = row.comercio || row.descripcion
         const match = matchMap[key]
         const override = rowOverrides[i] ?? {}
+        const isAutoNew = match?.es_nuevo && !override.supplier_id && !override._skip_new
+        const nombre = (override.nombre_nuevo ?? match?.nombre_sugerido ?? '').trim()
+        const newSupplierId = isAutoNew && nombre ? (createdMap.get(nombre) ?? null) : null
         return {
           ...row,
-          supplier_id: override.supplier_id ?? (match?.es_nuevo ? null : match?.supplier_id ?? null),
+          supplier_id: override.supplier_id ?? newSupplierId ?? (match?.es_nuevo ? null : match?.supplier_id ?? null),
           cost_center_id: override.cost_center_id ?? null,
-          comercio: override.nombre_proveedor ?? row.comercio,
+          comercio: override.nombre_proveedor ?? (isAutoNew && nombre ? nombre : null) ?? row.comercio,
         }
       })
 
+      // ── 4. Importar ───────────────────────────────────────────────────────
       const res = await fetch('/api/banco', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows: enrichedRows, institution: pdfInstitution, document_type: documentType }),
       })
       const data = await res.json()
       if (data.ok) {
-        setImportResult(data)
+        setImportResult({ ...data, auto_created: createdMap.size })
         setImportStep('done')
         router.refresh()
       } else {
@@ -472,9 +505,10 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                       const match = matchMap[key]
                       const override = rowOverrides[i] ?? {}
                       const supplierId = override.supplier_id ?? (match?.es_nuevo ? null : match?.supplier_id ?? null)
-                      const supplierName = override.nombre_proveedor ?? (match?.nombre_sugerido ?? null)
-                      const isNew = !supplierId && !!supplierName
                       const isMatched = !!supplierId
+                      // Auto-nuevo: sin proveedor conocido, IA sugirió nombre, no fue descartado
+                      const isAutoNew = !!(match?.es_nuevo && !override.supplier_id && !override._skip_new)
+                      const nombreAutoNew = override.nombre_nuevo ?? match?.nombre_sugerido ?? ''
 
                       return (
                         <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50">
@@ -485,9 +519,27 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                           </td>
 
                           {/* Celda proveedor */}
-                          <td className="py-2 px-2 min-w-[160px]">
-                            {newProvForm?.idx === i ? (
-                              /* Mini-form crear proveedor */
+                          <td className="py-2 px-2 min-w-[170px]">
+                            {matchingProviders ? (
+                              <div className="h-4 w-24 bg-gray-100 rounded animate-pulse" />
+                            ) : isAutoNew ? (
+                              /* Input editable auto-generado por IA */
+                              <div className="flex items-center gap-1">
+                                <input
+                                  className="input text-xs py-0.5 flex-1 min-w-0 border-amber-200 bg-amber-50 focus:border-amber-400"
+                                  value={nombreAutoNew}
+                                  onChange={e => setRowOverrides(prev => ({ ...prev, [i]: { ...prev[i], nombre_nuevo: e.target.value } }))}
+                                  placeholder="Nombre del proveedor"
+                                />
+                                <span className="text-[9px] font-bold text-amber-500 uppercase tracking-wide flex-shrink-0">nuevo</span>
+                                <button
+                                  title="Omitir proveedor"
+                                  onClick={() => setRowOverrides(prev => ({ ...prev, [i]: { ...prev[i], _skip_new: true } }))}
+                                  className="text-gray-300 hover:text-gray-500 flex-shrink-0 text-xs leading-none"
+                                >✕</button>
+                              </div>
+                            ) : newProvForm?.idx === i ? (
+                              /* Mini-form crear proveedor manualmente */
                               <div className="flex flex-col gap-1 bg-amber-50 rounded p-1.5 border border-amber-200">
                                 <input
                                   className="input text-xs py-0.5"
@@ -519,18 +571,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                                   <button onClick={() => setNewProvForm(null)} className="btn btn-xs text-xs py-0.5">✕</button>
                                 </div>
                               </div>
-                            ) : matchingProviders ? (
-                              <div className="h-4 w-24 bg-gray-100 rounded animate-pulse" />
                             ) : (
+                              /* Select: proveedor existente o sin proveedor */
                               <div className="flex items-center gap-1">
-                                {/* Badge de proveedor */}
                                 <select
                                   className="select text-xs py-0.5 flex-1 min-w-0"
                                   value={supplierId ?? ''}
                                   onChange={e => {
                                     const val = e.target.value
                                     if (val === '__new__') {
-                                      setNewProvForm({ idx: i, nombre: supplierName ?? key, tipo: match?.tipo_sugerido ?? 'comercio' })
+                                      setNewProvForm({ idx: i, nombre: key, tipo: 'comercio' })
                                     } else {
                                       const sel = suppliers.find((s: any) => s.id === val)
                                       setRowOverrides(prev => ({ ...prev, [i]: { ...prev[i], supplier_id: val || null, nombre_proveedor: sel?.name ?? null } }))
@@ -541,11 +591,9 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                                   {suppliers.map((s: any) => (
                                     <option key={s.id} value={s.id}>{s.name}</option>
                                   ))}
-                                  <option value="__new__">+ Crear &quot;{supplierName ?? key}&quot;</option>
+                                  <option value="__new__">+ Crear nuevo</option>
                                 </select>
-                                {/* Indicador visual */}
                                 {isMatched && <span className="text-green-500 flex-shrink-0">✓</span>}
-                                {isNew && <span className="text-amber-500 flex-shrink-0">★</span>}
                               </div>
                             )}
                           </td>
@@ -579,10 +627,10 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
 
               {/* Leyenda */}
               {!matchingProviders && Object.keys(matchMap).length > 0 && (
-                <div className="flex gap-4 text-xs text-gray-400 mb-3">
+                <div className="flex flex-wrap gap-4 text-xs text-gray-400 mb-3">
                   <span><span className="text-green-500">✓</span> Proveedor encontrado</span>
-                  <span><span className="text-amber-500">★</span> Proveedor nuevo sugerido</span>
-                  <span>Los centros de costo vacíos se clasificarán automáticamente con IA</span>
+                  <span><span className="text-amber-500 font-bold text-[9px] uppercase">nuevo</span> Nombre sugerido por IA — editable antes de importar</span>
+                  <span>Centros de costo vacíos → clasificados por IA al importar</span>
                 </div>
               )}
 
@@ -605,7 +653,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="grid grid-cols-4 gap-2 mb-4">
             <div className="bg-green-50 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-green-700">{importResult?.inserted}</div>
               <div className="text-xs text-green-600">Importados</div>
@@ -616,11 +664,15 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
               </div>
               <div className="text-xs text-blue-600">Prov. asociados</div>
             </div>
+            <div className="bg-violet-50 rounded-lg p-2 text-center">
+              <div className="text-lg font-bold text-violet-700">{importResult?.auto_created ?? 0}</div>
+              <div className="text-xs text-violet-600">Prov. creados</div>
+            </div>
             <div className="bg-amber-50 rounded-lg p-2 text-center">
               <div className="text-lg font-bold text-amber-700">
                 {Object.values(rowOverrides).filter((o: any) => o?.cost_center_id).length}
               </div>
-              <div className="text-xs text-amber-600">Con centro asignado</div>
+              <div className="text-xs text-amber-600">Centros asignados</div>
             </div>
           </div>
           <p className="text-xs text-gray-400 mb-3">Los centros sin asignar fueron clasificados automáticamente por IA.</p>
