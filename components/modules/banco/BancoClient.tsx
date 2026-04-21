@@ -6,7 +6,6 @@
  * Excel/CSV genérico: exportado desde la web del banco.
  */
 import { useState, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils/formatters'
 import * as XLSX from 'xlsx'
 
@@ -94,7 +93,6 @@ function parseMovFact(raw: any[][]): any[] {
 }
 
 export function BancoClient({ connections, transactions, costCenters, suppliers = [], fintocPublicKey }: any) {
-  const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('movimientos')
   const [txList, setTxList] = useState(transactions)
@@ -109,6 +107,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
   const [importResult, setImportResult] = useState<any>(null)
   const [editingTx, setEditingTx] = useState<string|null>(null)
   const [filter, setFilter] = useState({ search: '', type: 'todos' })
+  const [previewSearch, setPreviewSearch] = useState('')
 
   // ── Cruce de proveedores ──────────────────────────────────────────────────
   // matchMap: clave = (comercio || descripcion) → { supplier_id, nombre_sugerido, tipo_sugerido, es_nuevo }
@@ -183,12 +182,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
 
   // Parsear archivo Excel o CSV del banco
   const parseFile = useCallback(async (file: File) => {
+    // Limpiar estado previo antes de parsear cualquier archivo
+    setPreviewSearch('')
+    setNewProvForm(null)
+    setError('')
+
     // Despachar según tipo de archivo
     if (file.name.toLowerCase().endsWith('.pdf')) {
       return parsePdf(file)
     }
 
-    setError('')
     setProcessingMsg('Leyendo archivo...')
     setImportStep('processing')
     try {
@@ -298,6 +301,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
     if (file) parseFile(file)
   }
 
+  const refreshTransactions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/banco')
+      if (res.ok) {
+        const { transactions: fresh } = await res.json()
+        setTxList(fresh ?? [])
+      }
+    } catch { /* silencioso — la lista se actualizará en el próximo refresh */ }
+  }, [])
+
   const handleImport = async () => {
     setImporting(true); setError('')
     try {
@@ -355,7 +368,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       if (data.ok) {
         setImportResult({ ...data, auto_created: createdMap.size })
         setImportStep('done')
-        router.refresh()
+        await refreshTransactions()
       } else {
         setError(data.error ?? 'Error al importar')
       }
@@ -445,11 +458,33 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
               )}>{k}</button>
           ))}
         </div>
-        <button onClick={() => { setImportStep('idle'); setParsedRows([]); setImportResult(null) }}
+        <button
+          onClick={() => {
+            setImportStep('idle')
+            setParsedRows([])
+            setImportResult(null)
+            setPreviewSearch('')
+            fileRef.current?.click()
+          }}
           className="btn btn-sm mb-1">
           + Importar movimientos
         </button>
       </div>
+
+      {/* Input de archivo siempre montado para poder dispararlo desde el botón */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.xlsx,.xls,.csv"
+        className="hidden"
+        onChange={e => {
+          if (e.target.files?.[0]) {
+            setPreviewSearch('')
+            parseFile(e.target.files[0])
+            e.target.value = ''
+          }
+        }}
+      />
 
       {error && <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</div>}
 
@@ -525,6 +560,32 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                 </div>
               )}
 
+              {/* Barra de búsqueda / filtro del preview */}
+              <div className="flex items-center gap-2 mb-2">
+                <div className="relative flex-1 max-w-xs">
+                  <input
+                    className="input text-xs w-full pr-6"
+                    placeholder="Filtrar por descripción o proveedor..."
+                    value={previewSearch}
+                    onChange={e => setPreviewSearch(e.target.value)}
+                  />
+                  {previewSearch && (
+                    <button
+                      onClick={() => setPreviewSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs leading-none"
+                    >✕</button>
+                  )}
+                </div>
+                {previewSearch && (
+                  <span className="text-xs text-gray-400 flex-shrink-0">
+                    {parsedRows.filter(r => {
+                      const h = `${r.descripcion ?? ''} ${r.comercio ?? ''}`.toLowerCase()
+                      return h.includes(previewSearch.toLowerCase())
+                    }).length} de {parsedRows.length}
+                  </span>
+                )}
+              </div>
+
               <div className="overflow-x-auto max-h-[420px] overflow-y-auto mb-4 border border-gray-100 rounded-lg">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-white border-b border-gray-200 z-10">
@@ -537,7 +598,15 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                     </tr>
                   </thead>
                   <tbody>
-                    {parsedRows.map((r, i) => {
+                    {parsedRows
+                      .map((r, i) => ({ ...r, _idx: i }))
+                      .filter(r => {
+                        if (!previewSearch) return true
+                        const h = `${r.descripcion ?? ''} ${r.comercio ?? ''}`.toLowerCase()
+                        return h.includes(previewSearch.toLowerCase())
+                      })
+                      .map((r) => {
+                      const i = r._idx
                       const key = r.comercio || r.descripcion
                       const match = matchMap[key]
                       const override = rowOverrides[i] ?? {}
@@ -744,14 +813,34 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                 <div>Mi Banco en línea → Tarjetas → Ver detalle → Exportar</div>
               </div>
             </div>
-            <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.csv" className="hidden"
-              onChange={e => e.target.files?.[0] && parseFile(e.target.files[0])} />
           </div>
           <div className="mt-3 text-center">
             <button onClick={() => {}} className="text-xs text-gray-400 hover:text-gray-600 underline">
               ¿Prefieres conectar directamente con Fintoc? (requiere plan pagado)
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ZONA COMPACTA — importar otra cartola cuando ya hay transacciones */}
+      {importStep === 'idle' && tab === 'movimientos' && txList.length > 0 && (
+        <div
+          onDragOver={e => { e.preventDefault(); setDragging(true) }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => {
+            e.preventDefault(); setDragging(false)
+            const file = e.dataTransfer.files[0]
+            if (file) { setPreviewSearch(''); parseFile(file) }
+          }}
+          onClick={() => fileRef.current?.click()}
+          className={cn(
+            'border border-dashed rounded-lg py-2.5 px-4 text-center text-xs cursor-pointer transition-all',
+            dragging
+              ? 'border-blue-300 bg-blue-50 text-blue-500'
+              : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-500'
+          )}
+        >
+          + Arrastra o haz clic para importar otra cartola o estado de cuenta
         </div>
       )}
 

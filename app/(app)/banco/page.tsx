@@ -22,7 +22,7 @@ export default async function BancoPage() {
       .select(`*, bank_accounts(name, type), cost_centers(name, icon, color), suppliers(id, name, type, category)`)
       .eq('user_id', user.id)
       .order('transaction_date', { ascending: false })
-      .limit(100),
+      .limit(500),
     supabase
       .from('cost_centers')
       .select('id, name, icon, color')
