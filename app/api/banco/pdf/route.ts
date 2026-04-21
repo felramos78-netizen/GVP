@@ -46,10 +46,16 @@ Reglas:
 - Convierte fechas al formato YYYY-MM-DD (ej: 26/12/25 → 2025-12-26)
 - cargo y abono son números positivos (sin símbolo $, sin puntos de miles)
 - Si solo hay "monto" (tarjeta crédito), ponlo como cargo
-- comercio: extrae el nombre del comercio limpio (sin ciudad, sin código)
-  Ej: "SUMUP * DELIMARKT SANTIAGO" → "Delimarket"
+- comercio: el NOMBRE POPULAR (nombre de pila) de la marca real — NO copies ni limpies la descripción
+  Identifica la cadena/marca aunque la descripción tenga código de sucursal o dirección:
+  Ej: "EXPRESS PORTUGAL SANTIAGO" → "Líder" (es Lider Express sucursal Portugal)
+  Ej: "HIP LIDER PPE DE GALES SANTIAGO" → "Líder"
+  Ej: "SUMUP * DELIMARKET SANTIAGO" → "Delimarket" (nombre real después de SUMUP *)
   Ej: "MERCADOPAGO *LAS3B Las Condes" → "MercadoPago"
+  Ej: "DIDI DIDI LAS CONDES" → "DiDi"
+  Ej: "CRUZ VERDE CV 1034 SANTIAGO" → "Cruz Verde"
   Ej: "INTERESES LINEA DE CREDITO" → null
+  Si no puedes identificar la marca real → null (no inventes ni copies el texto)
 - tipo: "compra", "transferencia", "cargo_bancario", "pago" u "otro"
 - Incluye TODOS los movimientos, incluyendo cargos bancarios e intereses
 - No omitas ninguna transacción

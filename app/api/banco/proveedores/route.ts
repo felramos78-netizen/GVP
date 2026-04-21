@@ -192,35 +192,56 @@ export async function POST(request: NextRequest) {
           .map((s: any) => `${s.id}|${s.name}|${s.type}`)
           .join('\n')
 
-        const prompt = `Cruza estas descripciones bancarias chilenas con la lista de proveedores existentes.
+        const prompt = `Eres un experto en comercios chilenos. Tu tarea es identificar el NOMBRE POPULAR (nombre de pila) de cada establecimiento a partir de descripciones de transacciones bancarias.
 
-Proveedores existentes (id|nombre|tipo):
+REGLA PRINCIPAL: NO copies ni limpies el texto de la descripción. Identifica la MARCA REAL del comercio.
+- Si es una cadena reconocida → usa el nombre oficial de la cadena
+- Si no puedes identificar la marca con certeza → busca en la web antes de responder
+- Solo si definitivamente no hay información disponible → usa el texto más limpio posible
+
+Ejemplos de cómo mapear descripciones chilenas a nombres reales:
+- "EXPRESS PORTUGAL SANTIAGO" → "Líder" (es Lider Express, sucursal Portugal)
+- "HIP LIDER PPE DE GALES SANTIAGO" → "Líder"
+- "LIDER EXPRESS XXXX" → "Líder"
+- "UNIMARC XXX SANTIAGO" → "Unimarc"
+- "JUMBO XXX" → "Jumbo"
+- "SUPER10 XXX" → "Super 10"
+- "DIDI DIDI LAS CONDES" → "DiDi"
+- "SUMUP * DELIMARKET SANTIAGO" → "Delimarket" (nombre después de SUMUP *)
+- "SUMUP * AREPAS DONA M SANTIAGO" → "Arepas Doña M" (nombre después de SUMUP *)
+- "MERCADOPAGO *CHALITO Las Condes" → "Chalito" (comercio detrás de MercadoPago)
+- "MP *MERCADO LIBRE TASA INT. 0,00%" → "Mercado Libre"
+- "CRUZ VERDE CV 1034 SANTIAGO" → "Cruz Verde"
+- "INVERSION TOMORROW L SANTIAGO" → "Tomorrow" (fintech chilena de inversiones)
+- "SPID LOS TRIGALES O496 SANTIAGO" → "Spid" (supermercado)
+- "BLACK WHITE PROV SANTIAGO" → "Black & White" (si lo identificas) o el nombre más limpio
+- "INTERESES LINEA DE CREDITO" → el banco correspondiente
+- "EDGAR JOEL SANTA CRU SANTIAGO" → nombre de persona, probablemente servicio independiente
+
+Proveedores ya existentes en el sistema (id|nombre|tipo) — si la descripción corresponde a uno de estos, devuelve su id:
 ${suppliersDesc}
 
-Descripciones a cruzar:
+Descripciones bancarias a identificar:
 ${unmatched.map((d, i) => `${i}. "${d}"`).join('\n')}
-
-Para cada descripción, determina:
-1. Si corresponde a algún proveedor existente → devuelve su id
-2. Si es un proveedor nuevo → devuelve null y sugiere un nombre limpio (razón social)
-3. Si es un cargo bancario/interés/comisión → el proveedor es el banco (busca "Banco de Chile" u otro banco en la lista)
 
 Responde SOLO con JSON válido sin markdown:
 {
   "matches": [
     {
       "index": 0,
-      "supplier_id": "uuid-o-null",
-      "nombre_sugerido": "Nombre limpio del comercio",
-      "tipo_sugerido": "comercio|servicio|banco|combustible|farmacia|restaurant|transporte|entretenimiento",
-      "confianza": 0.8
+      "supplier_id": "uuid-si-existe-en-lista-o-null",
+      "nombre_sugerido": "Nombre popular real del comercio",
+      "tipo_sugerido": "comercio|servicio|banco|combustible|farmacia|restaurant|supermercado|transporte|entretenimiento",
+      "confianza": 0.9
     }
   ]
 }`
 
         try {
+          // Usar modelo con Google Search para identificar marcas desconocidas
           const model = genAI.getGenerativeModel({
-            model: 'gemini-2.5-flash-lite',
+            model: 'gemini-2.5-flash',
+            tools: [{ googleSearch: {} }],
             generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
           })
           const result = await model.generateContent(prompt)
