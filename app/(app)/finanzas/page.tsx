@@ -1,6 +1,6 @@
 /**
  * app/(app)/finanzas/page.tsx
- * Gestión de centros de costo y presupuesto mensual.
+ * Gestión de centros de costo, presupuesto mensual y manutención.
  */
 import { createClient } from '@/lib/supabase/server'
 import { FinanzasClient } from '@/components/modules/finanzas/FinanzasClient'
@@ -14,10 +14,12 @@ export default async function FinanzasPage() {
   const now = new Date()
   const yearMonth = format(now, 'yyyy-MM-01')
 
-  const [profile, costCenters, budgets] = await Promise.all([
+  const [profile, costCenters, budgets, mantencionRes, suppliersRes] = await Promise.all([
     supabase.from('users').select('monthly_income, pay_day').eq('id', user.id).single(),
     supabase.from('cost_centers').select('*').eq('user_id', user.id).eq('is_active', true).order('sort_order'),
     supabase.from('monthly_budget').select('*').eq('user_id', user.id).eq('year_month', yearMonth),
+    supabase.from('mantencion_entries').select('*, suppliers(id, name)').eq('user_id', user.id).eq('activo', true).order('created_at'),
+    supabase.from('suppliers').select('id, name, category').or(`user_id.is.null,user_id.eq.${user.id}`).eq('is_active', true).order('name'),
   ])
 
   return (
@@ -34,6 +36,8 @@ export default async function FinanzasPage() {
         costCenters={costCenters.data ?? []}
         budgets={budgets.data ?? []}
         yearMonth={yearMonth}
+        mantencionEntries={mantencionRes.data ?? []}
+        suppliers={suppliersRes.data ?? []}
       />
     </div>
   )
