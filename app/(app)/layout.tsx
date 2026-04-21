@@ -1,12 +1,8 @@
-/**
- * app/(app)/layout.tsx
- * Layout para todas las rutas protegidas.
- * Incluye sidebar, header, widget del agente y verifica autenticación.
- */
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/modules/layout/Sidebar'
 import { Header } from '@/components/modules/layout/Header'
+import { BottomNav } from '@/components/modules/layout/BottomNav'
 import { AgenteWidget } from '@/components/modules/agente/AgenteWidget'
 
 export default async function AppLayout({
@@ -29,16 +25,23 @@ export default async function AppLayout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar />
+      {/* Sidebar: sólo visible en desktop */}
+      <div className="hidden md:flex">
+        <Sidebar />
+      </div>
+
       <div className="flex flex-col flex-1 overflow-hidden">
         <Header userName={profile.name} />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
         </main>
       </div>
-      {/* Mesa de ayuda — accesible desde cualquier pantalla */}
+
+      {/* Navegación inferior: sólo visible en móvil */}
+      <BottomNav />
+
       <AgenteWidget />
     </div>
   )

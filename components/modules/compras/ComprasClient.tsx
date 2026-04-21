@@ -1,20 +1,21 @@
 'use client'
 /**
  * components/modules/compras/ComprasClient.tsx
- * Módulo de Compras — importar boleta con IA, historial, finanzas.
+ * Módulo de Compras — importar boleta con IA, historial, proveedores.
  */
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils/formatters'
+import { ProveedoresClient } from './ProveedoresClient'
 
-type Tab = 'importar' | 'historial'
+type Tab = 'importar' | 'historial' | 'proveedores'
 type ImportStep = 'upload' | 'processing' | 'preview' | 'confirming' | 'done'
 
 const TIPO_OPTIONS = ['comestible','bebestible','aseo','mascotas','suplemento']
 const UBI_OPTIONS = ['Refrigerador','Congelador','Despensa','Mesón','Baño','Cajón']
 const CAT_OPTIONS = ['proteína','lácteo','carbohidrato','verdura','fruta','legumbre','aceite','condimento','bebida','limpieza','higiene','mascotas','otro']
 
-export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) {
+export function ComprasClient({ costCenters, recentPurchases, suppliers, allPurchases }: any) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('importar')
@@ -165,6 +166,13 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
           },
         }),
       })
+
+      if (res.status === 409) {
+        const err = await res.json()
+        setError(`⚠️ ${err.message ?? 'Boleta duplicada'}`)
+        setStep('preview')
+        return
+      }
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setResultado(data)
@@ -191,7 +199,7 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
     <div className="flex flex-col gap-4">
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
-        {([['importar','📄 Importar boleta'],['historial','📋 Historial']] as const).map(([k,l]) => (
+        {([['importar','📄 Importar boleta'],['historial','📋 Historial'],['proveedores','🏪 Proveedores']] as const).map(([k,l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={cn('px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
               tab === k ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -487,6 +495,14 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers }: any) 
             </div>
           )}
         </div>
+      )}
+
+      {/* ── PROVEEDORES ── */}
+      {tab === 'proveedores' && (
+        <ProveedoresClient
+          suppliers={suppliers}
+          purchases={allPurchases ?? recentPurchases}
+        />
       )}
 
       {/* ── HISTORIAL ── */}

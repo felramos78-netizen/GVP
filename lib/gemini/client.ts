@@ -6,11 +6,14 @@
  */
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai'
 
-if (!process.env.GEMINI_API_KEY) {
-  throw new Error('GEMINI_API_KEY no está definida en las variables de entorno.')
+function getGenAI() {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY no está definida en las variables de entorno.')
+  }
+  return new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 }
 
-export const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+export const genAI = { getGenerativeModel: (...args: Parameters<GoogleGenerativeAI['getGenerativeModel']>) => getGenAI().getGenerativeModel(...args) }
 
 /**
  * Modelo de búsqueda de precios con Google Search integrado.

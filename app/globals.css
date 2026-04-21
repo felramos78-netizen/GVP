@@ -5,6 +5,7 @@
 @layer base {
   :root {
     --sidebar-width: 220px;
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   * {
@@ -17,6 +18,11 @@
 
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
+  }
+
+  /* Safe area para dispositivos iOS con notch */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   /* Scrollbar delgado */
