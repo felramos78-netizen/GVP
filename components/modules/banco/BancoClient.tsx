@@ -446,11 +446,33 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
               )}>{k}</button>
           ))}
         </div>
-        <button onClick={() => { setImportStep('idle'); setParsedRows([]); setImportResult(null) }}
+        <button
+          onClick={() => {
+            setImportStep('idle')
+            setParsedRows([])
+            setImportResult(null)
+            setPreviewSearch('')
+            fileRef.current?.click()
+          }}
           className="btn btn-sm mb-1">
           + Importar movimientos
         </button>
       </div>
+
+      {/* Input de archivo siempre montado para poder dispararlo desde el botón */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.xlsx,.xls,.csv"
+        className="hidden"
+        onChange={e => {
+          if (e.target.files?.[0]) {
+            setPreviewSearch('')
+            parseFile(e.target.files[0])
+            e.target.value = ''
+          }
+        }}
+      />
 
       {error && <div className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</div>}
 
@@ -779,8 +801,6 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                 <div>Mi Banco en línea → Tarjetas → Ver detalle → Exportar</div>
               </div>
             </div>
-            <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.csv" className="hidden"
-              onChange={e => e.target.files?.[0] && parseFile(e.target.files[0])} />
           </div>
           <div className="mt-3 text-center">
             <button onClick={() => {}} className="text-xs text-gray-400 hover:text-gray-600 underline">
