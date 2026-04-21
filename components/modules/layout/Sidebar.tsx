@@ -11,7 +11,7 @@ const navItems = [
   { href: '/banco',      label: 'Banco',         icon: '🏦' },
   { href: '/stock',      label: 'Stock',         icon: '📦' },
   { href: '/compras',    label: 'Compras',       icon: '🛒' },
-  { href: '/aseo',       label: 'Actividades',   icon: '✅' },
+  { href: '/actividades', label: 'Actividades',   icon: '✅' },
   { href: '/planner',    label: 'Planner',       icon: '📅' },
   { href: '/recetas',    label: 'Recetas',       icon: '🍽️' },
   { href: '/cotizacion', label: 'Cotización',    icon: '📊' },

@@ -37,10 +37,14 @@ export async function getStock(supabase: Supabase, userId: string) {
       )
     `)
     .eq('user_id', userId)
-    .order('products(category)', { ascending: true })
 
   if (error) throw new Error(`getStock: ${error.message}`)
-  return data as StockWithProduct[]
+  const sorted = (data ?? []).sort((a, b) => {
+    const ca = (a as any).products?.category ?? ''
+    const cb = (b as any).products?.category ?? ''
+    return ca.localeCompare(cb, 'es')
+  })
+  return sorted as StockWithProduct[]
 }
 
 /**
@@ -53,8 +57,11 @@ export async function getLowStockAlerts(supabase: Supabase, userId: string) {
     .eq('user_id', userId)
     .order('current_qty', { ascending: true })
 
-  if (error) throw new Error(`getLowStockAlerts: ${error.message}`)
-return (data ?? []).filter(row => row.current_qty <= row.min_qty)
+  if (error) {
+    console.error('getLowStockAlerts:', error.message)
+    return []
+  }
+  return (data ?? []).filter(row => row.current_qty <= row.min_qty)
 }
 
 /**
@@ -217,6 +224,9 @@ export async function getPurchaseHistory(
     .order('purchased_at', { ascending: false })
     .limit(limit)
 
-  if (error) throw new Error(`getPurchaseHistory: ${error.message}`)
-  return data
+  if (error) {
+    console.error('getPurchaseHistory:', error.message)
+    return []
+  }
+  return data ?? []
 }

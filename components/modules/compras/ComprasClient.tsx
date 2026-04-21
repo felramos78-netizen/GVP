@@ -166,6 +166,13 @@ export function ComprasClient({ costCenters, recentPurchases, suppliers, allPurc
           },
         }),
       })
+
+      if (res.status === 409) {
+        const err = await res.json()
+        setError(`⚠️ ${err.message ?? 'Boleta duplicada'}`)
+        setStep('preview')
+        return
+      }
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setResultado(data)
