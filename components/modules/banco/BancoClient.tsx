@@ -480,6 +480,43 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
                 </div>
                 <button onClick={() => setImportStep('idle')} className="btn btn-sm">Cancelar</button>
               </div>
+
+              {/* Resumen del documento */}
+              {(() => {
+                const totalCargo = parsedRows.reduce((s, r) => s + (r.cargo ?? 0), 0)
+                const totalAbono = parsedRows.reduce((s, r) => s + (r.abono ?? 0), 0)
+                const fechas = parsedRows.map(r => r.fecha).filter(Boolean).sort()
+                const desde = fechas[0] ?? null
+                const hasta = fechas[fechas.length - 1] ?? null
+                const fmtDate = (d: string) => {
+                  const [y, m, day] = d.split('-')
+                  return `${day}/${m}/${y}`
+                }
+                return (
+                  <div className="grid grid-cols-3 gap-3 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <div>
+                      <div className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-0.5">Total cargado</div>
+                      <div className="text-base font-bold text-red-600">${fmt(totalCargo)}</div>
+                    </div>
+                    {totalAbono > 0 && (
+                      <div>
+                        <div className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-0.5">Total abonado</div>
+                        <div className="text-base font-bold text-green-600">${fmt(totalAbono)}</div>
+                      </div>
+                    )}
+                    <div className={totalAbono > 0 ? '' : 'col-span-2'}>
+                      <div className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-0.5">Período</div>
+                      <div className="text-sm font-semibold text-gray-700">
+                        {desde && hasta
+                          ? desde === hasta
+                            ? fmtDate(desde)
+                            : `${fmtDate(desde)} → ${fmtDate(hasta)}`
+                          : '—'}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
               {/* Indicador de carga del matching */}
               {matchingProviders && (
                 <div className="flex items-center gap-2 text-xs text-gray-500 mb-3 bg-gray-50 rounded-lg px-3 py-2">
