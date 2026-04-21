@@ -1,8 +1,9 @@
 'use client'
 /**
  * BancoClient — importación por archivo PDF, Excel o CSV.
- * PDF: cartola o estado de cuenta tarjeta de crédito (extracción via Gemini).
- * Excel/CSV: exportado desde la web del banco.
+ * PDF: cartola (extracción via Gemini).
+ * Excel Mov_Facturado: estado de cuenta tarjeta de crédito Banco de Chile.
+ * Excel/CSV genérico: exportado desde la web del banco.
  */
 import { useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
@@ -11,6 +12,86 @@ import * as XLSX from 'xlsx'
 
 type Tab = 'movimientos' | 'cuentas' | 'resumen'
 type ImportStep = 'idle' | 'processing' | 'preview' | 'done'
+
+// ── Parser Mov_Facturado Banco de Chile ──────────────────────────────────────
+// Detecta si el Excel es un "Movimientos Facturados" de Banco de Chile
+function detectMovFact(raw: any[][]): boolean {
+  for (let i = 0; i < Math.min(25, raw.length); i++) {
+    const str = raw[i].map((c: any) => String(c)).join(' ').toLowerCase()
+    if (str.includes('movimientos facturados')) return true
+  }
+  return false
+}
+
+// Normaliza string: minúsculas, sin tildes
+const normStr = (s: string) =>
+  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
+
+// Parsea el formato Mov_Facturado: Categoría|Fecha|Descripción|...|Cuotas|...|Monto($)
+function parseMovFact(raw: any[][]): any[] {
+  // Buscar fila de cabecera de la tabla (contiene Fecha + Descripción + Monto)
+  let headerIdx = -1
+  for (let i = 0; i < raw.length; i++) {
+    const cols = raw[i].map((c: any) => normStr(String(c)))
+    if (
+      cols.some(c => c === 'fecha') &&
+      cols.some(c => c.includes('descripci')) &&
+      cols.some(c => c.includes('monto'))
+    ) { headerIdx = i; break }
+  }
+  if (headerIdx === -1) return []
+
+  const headers = raw[headerIdx].map((h: any) => normStr(String(h)))
+  const fechaIdx  = headers.findIndex(h => h === 'fecha')
+  const descIdx   = headers.findIndex(h => h.includes('descripci'))
+  const montoIdx  = headers.findIndex(h => h.includes('monto'))
+
+  const parseDate = (v: any): string => {
+    if (!v) return ''
+    if (v instanceof Date) return v.toISOString().split('T')[0]
+    const s = String(v).trim()
+    const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/)
+    if (m) {
+      const y = m[3].length === 2 ? '20' + m[3] : m[3]
+      return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+    }
+    return s
+  }
+
+  const parseNum = (v: any): number => {
+    if (typeof v === 'number') return Math.abs(v)
+    const s = String(v).replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '')
+    return Math.abs(parseFloat(s) || 0)
+  }
+
+  // Detecta pagos/abonos a la tarjeta (no son gastos)
+  const isPago = (desc: string): boolean => {
+    const d = normStr(desc)
+    return (d.includes('pago') || d.includes('abono')) &&
+      (d.includes('tef') || d.includes('pesos') || d.includes('online') || d.includes('web') || d.includes('transfer'))
+  }
+
+  const rows: any[] = []
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const r = raw[i]
+    if (!r || !r.some((c: any) => c !== '' && c != null)) continue
+
+    const fecha       = fechaIdx  >= 0 ? parseDate(r[fechaIdx]) : ''
+    const descripcion = descIdx   >= 0 ? String(r[descIdx]).trim() : ''
+    const monto       = montoIdx  >= 0 ? parseNum(r[montoIdx]) : 0
+
+    if (!fecha || !descripcion || monto === 0) continue
+
+    rows.push({
+      fecha,
+      descripcion,
+      cargo: isPago(descripcion) ? 0 : monto,
+      abono: isPago(descripcion) ? monto : 0,
+      saldo: null,
+    })
+  }
+  return rows
+}
 
 export function BancoClient({ connections, transactions, costCenters, suppliers = [], fintocPublicKey }: any) {
   const router = useRouter()
@@ -116,6 +197,19 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       const ws = wb.Sheets[wb.SheetNames[0]]
       const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
 
+      // ── Formato Mov_Facturado Banco de Chile (tarjeta de crédito) ──────────
+      if (detectMovFact(raw)) {
+        const rows = parseMovFact(raw).slice(0, 500)
+        if (rows.length === 0) throw new Error('No se encontraron movimientos en el archivo Mov_Facturado. Verifica que el archivo sea correcto.')
+        setDocumentType('tarjeta_credito')
+        setPdfInstitution('Banco de Chile')
+        setParsedRows(rows)
+        setImportStep('preview')
+        fetchProviderMatches(rows)
+        return
+      }
+
+      // ── Formato genérico Excel/CSV ─────────────────────────────────────────
       // Detectar fila de cabecera buscando palabras clave
       const headerKeywords = ['fecha', 'descripcion', 'descripción', 'cargo', 'abono', 'saldo', 'monto', 'glosa', 'debe', 'haber']
       let headerIdx = 0
@@ -549,15 +643,16 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
             )}>
             <div className="text-4xl mb-3">📄</div>
             <div className="text-sm font-semibold text-gray-700 mb-2">Arrastra o sube tu documento bancario</div>
-            <div className="text-xs text-gray-400 mb-4">PDF · Excel (.xlsx) · CSV — cartola o estado de cuenta tarjeta</div>
+            <div className="text-xs text-gray-400 mb-4">PDF · Excel (.xlsx · .xls) · CSV — cartola o movimientos facturados</div>
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="bg-blue-50 rounded-lg p-2.5 text-left text-xs text-blue-700">
                 <div className="font-semibold mb-1">Cartola (PDF o Excel)</div>
                 <div>Mi Banco en línea → Cuentas → Movimientos → Exportar</div>
               </div>
               <div className="bg-violet-50 rounded-lg p-2.5 text-left text-xs text-violet-700">
-                <div className="font-semibold mb-1">Tarjeta de Crédito (PDF)</div>
-                <div>Mi Banco en línea → Tarjetas → Estado de cuenta → Descargar PDF</div>
+                <div className="font-semibold mb-1">Tarjeta de Crédito</div>
+                <div className="font-medium text-violet-600 mb-0.5">Mov_Facturado (.xls) — recomendado</div>
+                <div>Mi Banco en línea → Tarjetas → Ver detalle → Exportar</div>
               </div>
             </div>
             <input ref={fileRef} type="file" accept=".pdf,.xlsx,.xls,.csv" className="hidden"
