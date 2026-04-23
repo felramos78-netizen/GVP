@@ -1,5 +1,19 @@
 create extension if not exists "uuid-ossp";
 
+-- Tabla de abonos de manutención
+create table if not exists public.mantencion_entries (
+  id          uuid default gen_random_uuid() primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  nombre      text not null default 'Nuevo abono',
+  monto       numeric(15,2) not null default 0,
+  supplier_id uuid references public.suppliers(id) on delete set null,
+  activo      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+alter table public.mantencion_entries enable row level security;
+create policy "mantencion_self" on public.mantencion_entries
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 create table if not exists public.users (
   id              uuid primary key references auth.users(id) on delete cascade,
   name            varchar(100) not null,
