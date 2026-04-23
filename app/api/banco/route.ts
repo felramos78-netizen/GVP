@@ -55,10 +55,14 @@ export async function POST(request: NextRequest) {
     if (toClassify.length > 0 && costCenters?.length) {
       const model = genAI.getGenerativeModel({
         model: 'gemini-2.5-flash-lite',
-        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json',
+        },
       })
 
-      const centersDesc = costCenters.map((c: any) => `${c.id}|${c.name}`).join(', ')
+      const centersDesc = costCenters.map((c: any) => `${c.id}|${c.name}`).join('\n')
       const txSample = toClassify.map((r: any, i: number) =>
         `${i}. ${r.fecha} | "${r.descripcion}" | cargo:${r.cargo ?? 0} | abono:${r.abono ?? 0}`
       ).join('\n')
@@ -71,7 +75,7 @@ ${centersDesc}
 Movimientos:
 ${txSample}
 
-Responde SOLO con JSON (sin markdown):
+Responde con JSON según este esquema:
 {
   "clasificaciones": [
     {
@@ -86,10 +90,13 @@ Responde SOLO con JSON (sin markdown):
 
       try {
         const result = await model.generateContent(prompt)
-        const text = result.response.text().replace(/```json|```/g, '').trim()
-        const json = JSON.parse(text.match(/\{[\s\S]*\}/)![0])
-        clasificaciones = json.clasificaciones ?? []
-      } catch { /* continuar sin clasificación */ }
+        const text = result.response.text()
+        const parsed = JSON.parse(text)
+        clasificaciones = parsed.clasificaciones ?? []
+      } catch (e) {
+        console.error('[banco] Clasificación Gemini falló:', e)
+        /* continuar sin clasificación */
+      }
     }
 
     // Mapear clasificaciones al índice original en toClassify
@@ -140,11 +147,18 @@ Responde SOLO con JSON (sin markdown):
     // Índice separado para clasificaciones de toClassify
     let classifyIdx = 0
     let inserted = 0
+    let firstUpsertError: string | null = null
 
     for (let i = 0; i < rows.slice(0, 500).length; i++) {
       const row = rows[i]
-      const amount = row.cargo ? -Math.abs(row.cargo) : Math.abs(row.abono ?? 0)
-      const txId = `manual_${user.id}_${row.fecha}_${i}`
+      // Use explicit null checks instead of truthiness to handle 0 correctly
+      const cargo = row.cargo != null && row.cargo !== 0 ? Math.abs(row.cargo) : 0
+      const abono = row.abono != null ? Math.abs(row.abono) : 0
+      const amount = cargo > 0 ? -cargo : abono
+
+      // Include description hash in txId to avoid collisions between different files on same date/position
+      const descHash = (row.descripcion ?? '').slice(0, 20).replace(/\s+/g, '_')
+      const txId = `manual_${user.id}_${row.fecha}_${i}_${descHash}`
 
       // Si el row no tenía cost_center_id, buscar en clasificaciones
       let costCenterId = row.cost_center_id ?? null
@@ -159,7 +173,7 @@ Responde SOLO con JSON (sin markdown):
         classifyIdx++
       }
 
-      const { error } = await supabase.from('bank_transactions').upsert({
+      const txData = {
         account_id: account.id,
         user_id: user.id,
         fintoc_transaction_id: txId,
@@ -175,9 +189,22 @@ Responde SOLO con JSON (sin markdown):
         is_expense: amount < 0,
         ai_classified: aiClassified,
         manually_reviewed: !!row.cost_center_id,
-      }, { onConflict: 'fintoc_transaction_id' })
+      }
 
-      if (!error) inserted++
+      // Try upsert (requires UNIQUE constraint on fintoc_transaction_id — see migration 003)
+      const { error } = await supabase.from('bank_transactions').upsert(txData, { onConflict: 'fintoc_transaction_id' })
+
+      if (!error) {
+        inserted++
+      } else if (error.code === '42P10') {
+        // No UNIQUE constraint yet — fall back to plain INSERT (migration 003 not applied)
+        if (!firstUpsertError) firstUpsertError = 'Falta el índice UNIQUE en fintoc_transaction_id. Ejecuta la migración 003.'
+        const { error: insertErr } = await supabase.from('bank_transactions').insert(txData)
+        if (!insertErr || insertErr.code === '23505') inserted++
+      } else {
+        if (!firstUpsertError) firstUpsertError = `${error.code}: ${error.message}`
+        console.error(`[banco] Error en fila ${i} (${txId}):`, error)
+      }
     }
 
     // Actualizar saldo si está disponible
@@ -194,7 +221,12 @@ Responde SOLO con JSON (sin markdown):
       last_sync_at: new Date().toISOString(),
     }).eq('id', connection!.id)
 
-    return NextResponse.json({ ok: true, inserted, total: rows.length })
+    return NextResponse.json({
+      ok: true,
+      inserted,
+      total: rows.length,
+      ...(firstUpsertError && { warning: firstUpsertError }),
+    })
 
   } catch (err) {
     console.error('Banco import error:', err)

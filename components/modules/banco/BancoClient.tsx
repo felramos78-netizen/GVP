@@ -241,8 +241,17 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       const cargoIdx = col(['cargo', 'debito', 'debe', 'egreso', 'retiro', 'gasto'])
       const abonoIdx = col(['abono', 'credito', 'haber', 'ingreso', 'deposito'])
       const saldoIdx = col(['saldo', 'balance'])
+      // Single-column amount format (e.g. BCI, Santander exports): positive = income, negative = expense
+      const montoIdx = (cargoIdx < 0 && abonoIdx < 0) ? col(['monto', 'importe', 'valor', 'amount']) : -1
 
       const parseNum = (v: any) => {
+        if (typeof v === 'number') return Math.abs(v)
+        const s = String(v).replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '')
+        return Math.abs(parseFloat(s) || 0)
+      }
+
+      // For signed single-column amounts (positive=income, negative=expense)
+      const parseSignedNum = (v: any) => {
         if (typeof v === 'number') return v
         const s = String(v).replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '')
         return parseFloat(s) || 0
@@ -262,13 +271,23 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       }
 
       const rows = dataRows
-        .map((r: any[]) => ({
-          fecha: fechaIdx >= 0 ? parseDate(r[fechaIdx]) : '',
-          descripcion: descIdx >= 0 ? String(r[descIdx]).trim() : '',
-          cargo: cargoIdx >= 0 ? parseNum(r[cargoIdx]) : 0,
-          abono: abonoIdx >= 0 ? parseNum(r[abonoIdx]) : 0,
-          saldo: saldoIdx >= 0 ? parseNum(r[saldoIdx]) : 0,
-        }))
+        .map((r: any[]) => {
+          let cargo = cargoIdx >= 0 ? parseNum(r[cargoIdx]) : 0
+          let abono = abonoIdx >= 0 ? parseNum(r[abonoIdx]) : 0
+          // Single-column monto: negative = expense (cargo), positive = income (abono)
+          if (montoIdx >= 0) {
+            const signed = parseSignedNum(r[montoIdx])
+            if (signed < 0) cargo = Math.abs(signed)
+            else abono = signed
+          }
+          return {
+            fecha: fechaIdx >= 0 ? parseDate(r[fechaIdx]) : '',
+            descripcion: descIdx >= 0 ? String(r[descIdx]).trim() : '',
+            cargo,
+            abono,
+            saldo: saldoIdx >= 0 ? parseNum(r[saldoIdx]) : 0,
+          }
+        })
         .filter(r => r.fecha && r.descripcion && (r.cargo > 0 || r.abono > 0))
         .slice(0, 500)
 
@@ -278,6 +297,7 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
           descIdx >= 0 ? 'descripción' : null,
           cargoIdx >= 0 ? 'cargo' : null,
           abonoIdx >= 0 ? 'abono' : null,
+          montoIdx >= 0 ? 'monto' : null,
         ].filter(Boolean)
         const hint = colsFound.length < 2
           ? 'No se detectaron columnas bancarias estándar. Asegúrate de exportar desde tu banco incluyendo columnas de fecha, descripción y monto.'
@@ -368,7 +388,13 @@ export function BancoClient({ connections, transactions, costCenters, suppliers 
       if (data.ok) {
         setImportResult({ ...data, auto_created: createdMap.size })
         setImportStep('done')
-        await refreshTransactions()
+        if (data.warning) console.warn('[banco] Import warning:', data.warning)
+        if (data.inserted === 0 && enrichedRows.length > 0) {
+          setError(`Ningún movimiento fue guardado. ${data.warning ?? 'Verifica que la migración 003 esté aplicada en Supabase.'}`)
+          setImportStep('idle')
+        } else {
+          await refreshTransactions()
+        }
       } else {
         setError(data.error ?? 'Error al importar')
       }
