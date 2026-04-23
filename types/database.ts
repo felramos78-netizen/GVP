@@ -323,6 +323,35 @@ export type Database = {
         Insert: Omit<Database['public']['Tables']['bank_transactions']['Row'], 'id' | 'created_at'>
         Update: Partial<Database['public']['Tables']['bank_transactions']['Insert']>
       }
+      mantencion_entries: {
+        Row: {
+          id: string
+          user_id: string
+          nombre: string
+          monto: number
+          supplier_id: string | null
+          activo: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          nombre?: string
+          monto?: number
+          supplier_id?: string | null
+          activo?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          nombre?: string
+          monto?: number
+          supplier_id?: string | null
+          activo?: boolean
+          created_at?: string
+        }
+      }
     }
   }
 }
@@ -358,6 +387,7 @@ export type BankConnection    = Tables<'bank_connections'>
 export type BankAccount       = Tables<'bank_accounts'>
 export type BankTransaction   = Tables<'bank_transactions'>
 export type ProviderAlias     = Tables<'provider_aliases'>
+export type MantencionEntry   = Tables<'mantencion_entries'>
 
 // Supplier type para uso en banco (más genérico)
 export type SupplierType = Database['public']['Tables']['suppliers']['Row']['type']

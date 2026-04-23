@@ -19,9 +19,13 @@ type MantencionEntry = {
   suppliers?: { id: string; name: string } | null
 }
 
+type MantForm = { nombre: string; monto: string; supplier_id: string }
+
 const EMPTY_FORM: CenterForm = {
   name: '', icon: '💰', type: 'variable', monthly_amount: '', description: '', color: '#185FA5',
 }
+
+const EMPTY_MANT_FORM: MantForm = { nombre: '', monto: '', supplier_id: '' }
 
 export function FinanzasClient({
   income, payDay, costCenters, budgets, yearMonth,
@@ -44,6 +48,10 @@ export function FinanzasClient({
   // ── Manutención state ──────────────────────────────────────────────────────
   const [mantenciones, setMantenciones] = useState<MantencionEntry[]>(mantencionEntries)
   const [savingMant, setSavingMant] = useState<string | null>(null)
+  const [showMantModal, setShowMantModal] = useState(false)
+  const [mantForm, setMantForm] = useState<MantForm>(EMPTY_MANT_FORM)
+  const [savingMantModal, setSavingMantModal] = useState(false)
+  const [mantError, setMantError] = useState('')
 
   // ── Computed ───────────────────────────────────────────────────────────────
   const totalAssigned = centers.reduce((s: number, c: any) => s + (c.monthly_amount ?? 0), 0)
@@ -116,21 +124,48 @@ export function FinanzasClient({
   }
 
   // ── Manutención handlers ───────────────────────────────────────────────────
-  const handleAddMant = async () => {
-    const res = await fetch('/api/finanzas/mantencion', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'create' }),
-    })
-    const data = await res.json()
-    if (data.entry) setMantenciones(prev => [...prev, data.entry])
+  const handleOpenAddMant = () => {
+    setMantForm(EMPTY_MANT_FORM)
+    setMantError('')
+    setShowMantModal(true)
+  }
+
+  const handleSaveMantModal = async () => {
+    setMantError('')
+    if (!mantForm.nombre.trim()) { setMantError('El nombre es obligatorio'); return }
+    const monto = parseInt(mantForm.monto)
+    if (!mantForm.monto || isNaN(monto) || monto < 0) { setMantError('El monto debe ser un número válido'); return }
+    setSavingMantModal(true)
+    try {
+      const res = await fetch('/api/finanzas/mantencion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', nombre: mantForm.nombre.trim(), monto, supplier_id: mantForm.supplier_id || null }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.error) { setMantError(data.error || 'Error al guardar. Intenta nuevamente.'); return }
+      if (data.entry) {
+        setMantenciones(prev => [...prev, data.entry])
+        setShowMantModal(false)
+      }
+    } catch {
+      setMantError('Error de conexión. Intenta nuevamente.')
+    } finally {
+      setSavingMantModal(false)
+    }
   }
 
   const handleUpdateMant = async (id: string, fields: Partial<MantencionEntry>) => {
     setSavingMant(id)
-    await fetch('/api/finanzas/mantencion', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update', id, ...fields }),
-    })
+    try {
+      const res = await fetch('/api/finanzas/mantencion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update', id, ...fields }),
+      })
+      const data = await res.json()
+      if (res.ok && data.entry) {
+        setMantenciones(prev => prev.map(m => m.id === id ? { ...m, ...data.entry } : m))
+      }
+    } catch { /* optimistic local state remains */ }
     setSavingMant(null)
   }
 
@@ -139,11 +174,13 @@ export function FinanzasClient({
 
   const handleDeleteMant = async (id: string) => {
     if (!confirm('¿Eliminar este abono?')) return
-    await fetch('/api/finanzas/mantencion', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', id }),
-    })
-    setMantenciones(prev => prev.filter(m => m.id !== id))
+    try {
+      const res = await fetch('/api/finanzas/mantencion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id }),
+      })
+      if (res.ok) setMantenciones(prev => prev.filter(m => m.id !== id))
+    } catch { /* noop */ }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -344,7 +381,7 @@ export function FinanzasClient({
                 <div className="text-2xl font-bold text-violet-700">{formatCLP(totalMant)}</div>
                 <div className="text-xs text-violet-400 mt-0.5">{mantenciones.length} abono{mantenciones.length !== 1 ? 's' : ''} registrado{mantenciones.length !== 1 ? 's' : ''}</div>
               </div>
-              <button onClick={handleAddMant} className="btn-primary">
+              <button onClick={handleOpenAddMant} className="btn-primary">
                 + Agregar abono
               </button>
             </div>
@@ -355,7 +392,7 @@ export function FinanzasClient({
             <div className="card text-center py-10">
               <div className="text-3xl mb-2">💸</div>
               <p className="text-sm text-gray-400 mb-3">Sin abonos registrados.</p>
-              <button onClick={handleAddMant} className="btn-primary mx-auto">+ Agregar primer abono</button>
+              <button onClick={handleOpenAddMant} className="btn-primary mx-auto">+ Agregar primer abono</button>
             </div>
           ) : (
             <div className="card divide-y divide-gray-100">
@@ -434,6 +471,46 @@ export function FinanzasClient({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Modal agregar abono de manutención */}
+      {showMantModal && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 w-full max-w-md shadow-xl">
+            <h3 className="text-base font-semibold text-gray-900 mb-4">Nuevo abono de manutención</h3>
+            {mantError && <div className="text-red-600 text-sm mb-3 bg-red-50 rounded-lg px-3 py-2">{mantError}</div>}
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="label">Nombre *</label>
+                <input className="input" placeholder="Ej: Pensión, arriendo recibido…" value={mantForm.nombre}
+                  onChange={e => setMantForm(p => ({ ...p, nombre: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveMantModal()} />
+              </div>
+              <div>
+                <label className="label">Monto mensual (CLP) *</label>
+                <input className="input" type="number" min="0" placeholder="0" value={mantForm.monto}
+                  onChange={e => setMantForm(p => ({ ...p, monto: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveMantModal()} />
+              </div>
+              <div>
+                <label className="label">Proveedor / Pagador (opcional)</label>
+                <select className="select" value={mantForm.supplier_id}
+                  onChange={e => setMantForm(p => ({ ...p, supplier_id: e.target.value }))}>
+                  <option value="">Sin proveedor</option>
+                  {suppliers.map((s: any) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => { setShowMantModal(false); setMantError('') }} className="btn">Cancelar</button>
+              <button onClick={handleSaveMantModal} disabled={savingMantModal} className="btn-primary">
+                {savingMantModal ? 'Guardando...' : 'Agregar abono'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
