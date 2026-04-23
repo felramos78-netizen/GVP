@@ -1,7 +1,7 @@
 'use client'
 /**
  * components/modules/dashboard/CostDashboard.tsx
- * Visión cruzada mensual de costos: centros de costo, mantención y compras reales.
+ * Visión cruzada mensual de costos: centros de costo, manutención y compras reales.
  */
 import { useState, useMemo } from 'react'
 import { formatCLP } from '@/lib/utils/formatters'
@@ -85,7 +85,7 @@ export function CostDashboard({ costCenters, purchases, bankTxs, mantencion, inc
     [bankTxs, selectedYM]
   )
 
-  // Total mantención mensual (siempre es el mismo, es fijo)
+  // Total manutención mensual (siempre es el mismo, es fijo)
   const totalMantencion = useMemo(
     () => mantencion.filter(m => m.activo).reduce((s, m) => s + m.monto, 0),
     [mantencion]
@@ -180,9 +180,9 @@ export function CostDashboard({ costCenters, purchases, bankTxs, mantencion, inc
           <span className="metric-sub">{bankThisMonth.length} transacciones</span>
         </div>
         <div className="metric-card border-l-4 border-purple-400">
-          <span className="metric-label">Mantención mensual</span>
+          <span className="metric-label">Manutención mensual</span>
           <span className="metric-value text-purple-700">{formatCLP(totalMantencion)}</span>
-          <span className="metric-sub">{mantencion.filter(m => m.activo).length} ítems activos</span>
+          <span className="metric-sub">{mantencion.filter(m => m.activo).length} abonos activos</span>
         </div>
       </div>
 
@@ -250,10 +250,10 @@ export function CostDashboard({ costCenters, purchases, bankTxs, mantencion, inc
                   </tr>
                 )
               })}
-              {/* Mantención */}
+              {/* Manutención */}
               {totalMantencion > 0 && (
                 <tr className="border-b border-gray-50 bg-purple-50/50">
-                  <td className="py-2.5 px-2 font-medium text-purple-800">🔧 Mantención</td>
+                  <td className="py-2.5 px-2 font-medium text-purple-800">💜 Manutención</td>
                   <td className="py-2.5 px-2 text-right text-gray-600">{formatCLP(totalMantencion)}</td>
                   <td className="py-2.5 px-2 text-right text-gray-400">—</td>
                   <td className="py-2.5 px-2 text-right text-gray-400">—</td>
@@ -280,10 +280,10 @@ export function CostDashboard({ costCenters, purchases, bankTxs, mantencion, inc
         </div>
       )}
 
-      {/* Lista mantención */}
+      {/* Lista manutención */}
       {mantencion.filter(m => m.activo).length > 0 && (
         <div className="card">
-          <h3 className="text-sm font-semibold text-gray-800 mb-3">🔧 Ítems de mantención mensual</h3>
+          <h3 className="text-sm font-semibold text-gray-800 mb-3">💜 Abonos de manutención mensual</h3>
           <div className="flex flex-col gap-1.5">
             {mantencion.filter(m => m.activo).map(m => (
               <div key={m.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
